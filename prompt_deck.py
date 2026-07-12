@@ -1,15 +1,14 @@
+/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 #!/usr/bin/env python3
+import argparse
 import math
 import os
-import pathlib
 import socket
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
-import tomllib
 from PySide6.QtCore import QEvent, QRectF, QSocketNotifier, Qt
 from PySide6.QtGui import (
     QBrush,
@@ -24,6 +23,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
+from deck_config import Card, Deck, DeckConfigError, load_decks
+
 IS_WINDOWS = sys.platform == "win32"
 SOURCE = Path(__file__).resolve().parent / "decks.toml"
 LEGACY_SOURCE = Path.home() / ".config" / "prompt-deck" / "decks.toml"
@@ -34,7 +35,7 @@ else:
 SOCKET = RUNTIME_DIR / "prompt-deck.sock"
 
 
-def deck_source() -> Path:
+def deck_source(config: Path | None = None) -> Path:
     """Return the TOML file used as the deck source.
 
     Returns
@@ -43,6 +44,8 @@ def deck_source() -> Path:
         ``SOURCE`` when it exists, otherwise ``LEGACY_SOURCE`` when it
         exists, otherwise ``SOURCE`` as the default path.
     """
+    if config is not None:
+        return config.expanduser().resolve()
     if SOURCE.exists():
         return SOURCE
     if LEGACY_SOURCE.exists():
@@ -68,125 +71,24 @@ def request_existing_daemon() -> bool:
         return False
 
 
-@dataclass
-class Card:
-    """A single prompt card.
-
-    Attributes
-    ----------
-    title : str
-        Card title shown in the grid.
-    body : str
-        Prompt text copied to the clipboard.
-    key : str
-        Optional single-key shortcut for selecting the card.
-    """
-
-    title: str
-    body: str
-    key: str = ""
-
-
-@dataclass
-class Deck:
-    """A named group of prompt cards.
-
-    Attributes
-    ----------
-    name : str
-        Deck name.
-    cards : list[Card]
-        Cards displayed when this deck is active.
-    """
-
-    name: str
-    cards: list[Card]
-
-
-def load_decks() -> list[Deck]:
-    """Load all prompt decks from the configured TOML source.
-
-    The loader starts at the path returned by ``deck_source()`` and follows
-    any TOML ``include`` patterns recursively. Each TOML deck dictionary is
-    converted into a ``Deck`` object, and each TOML card dictionary is
-    converted into a ``Card`` object.
-
-    Returns
-    -------
-    list[Deck]
-        A flat list of all loaded decks from the main TOML file and any
-        recursively included TOML files.
-    """
-    import glob
-
-    def load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
-        """Load decks from one TOML file and its recursive includes.
-
-        Parameters
-        ----------
-        path : Path
-            Filesystem path to the TOML file currently being loaded.
-        visited : set[Path]
-            TOML file paths that have already been loaded.
-
-        Returns
-        -------
-        list[Deck]
-            Deck objects parsed from ``path`` and files matched by its
-            ``include`` patterns.
-        """
-        path = path.resolve()
-        if path in visited or not path.exists():
-            return []
-        visited.add(path)
-        with path.open("rb") as source:
-            data = tomllib.load(source)
-            decks: list[Deck] = []
-            for deck_data in data.get("decks", []):
-                cards: list[Card] = []
-                for card_data in deck_data.get("cards", []):
-                    raw_body = card_data.get("body", "")
-                    clean_body = raw_body.strip() + "\n"
-                    card_obj = Card(
-                        title=card_data.get("title"),
-                        key=card_data.get("key", ""),
-                        body=clean_body,
-                    )
-                    cards.append(card_obj)
-
-                deck_obj = Deck(name=deck_data.get("name"), cards=cards)
-                decks.append(deck_obj)
-
-            for include in data.get("include", []):
-                include_path = path.parent / include
-                paths = glob.glob(str(include_path))
-                paths = sorted(paths)
-                for match in paths:
-                    match_path = Path(match)
-                    include_decks = load_recursive(match_path, visited=visited)
-                    decks.extend(include_decks)
-
-        return decks
-    visited: set[Path] = set()
-    decks = load_recursive(deck_source(), visited=visited)
-    return decks
-
-
 class PromptDeck(QWidget):
     """Qt widget that displays and controls the prompt deck UI."""
 
-    def __init__(self, decks: list[Deck], daemon: bool = False):
+    def __init__(self, decks: list[Deck], source: Path, daemon: bool = False):
         """Create the prompt deck window.
 
         Parameters
         ----------
         decks : list[Deck]
             Decks available in the UI.
+        source : Path
+            TOML file reloaded each time the window opens.
         daemon : bool
             When ``True``, closing the window hides it instead of quitting.
         """
         super().__init__()
         self.decks = decks
+        self.source = source
         self.daemon = daemon
         self.deck_index = 0
         self.card_index = 0
@@ -239,7 +141,7 @@ class PromptDeck(QWidget):
     def show_deck(self):
         """Reload decks, show the window, and focus it for selection."""
         try:
-            self.decks = load_decks()
+            self.decks = load_decks(self.source)
             self.deck_index = 0
             self.card_index = 0
             self.status = ""
@@ -447,7 +349,25 @@ class PromptDeck(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        self.draw_header(painter)
         self.draw_cards(painter)
+        self.draw_status(painter)
+
+    def draw_header(self, painter: QPainter):
+        """Draw the active deck name and position."""
+        painter.setPen(QColor(220, 230, 242, 210))
+        painter.setFont(QFont("Inter", 13, QFont.DemiBold))
+        label = f"{self.deck.name}  ·  {self.deck_index + 1}/{len(self.decks)}"
+        painter.drawText(QRectF(0, 12, self.width(), 28), Qt.AlignCenter, label)
+
+    def draw_status(self, painter: QPainter):
+        """Draw an error reported by loading or clipboard integration."""
+        if not self.status:
+            return
+        painter.setPen(QColor("#ffb4ab"))
+        painter.setFont(QFont("Inter", 12, QFont.DemiBold))
+        rect = QRectF(30, self.height() - 38, self.width() - 60, 24)
+        painter.drawText(rect, Qt.AlignCenter, self.status)
 
     def draw_cards(self, painter: QPainter):
         """Draw all cards for the active deck.
@@ -639,6 +559,16 @@ class PromptDeck(QWidget):
         return lines
 
 
+def parse_args(argv: list[str]):
+    parser = argparse.ArgumentParser(description="Open a keyboard-first prompt picker.")
+    parser.add_argument("--config", type=Path, help="path to the deck TOML file")
+    parser.add_argument("--daemon", action="store_true", help="keep PromptDeck warm")
+    parser.add_argument(
+        "--show", action="store_true", help="show PromptDeck at startup"
+    )
+    return parser.parse_known_args(argv)
+
+
 def main():
     """Run the Prompt Deck application.
 
@@ -648,20 +578,27 @@ def main():
         Qt application exit code, or ``0`` when an existing daemon handled
         the request.
     """
-    daemon = "--daemon" in sys.argv
-    if not daemon and "--show" not in sys.argv and request_existing_daemon():
+    args, qt_args = parse_args(sys.argv[1:])
+    if not args.daemon and args.config is None and request_existing_daemon():
         return 0
 
-    app = QApplication(sys.argv)
+    source = deck_source(args.config)
+    try:
+        decks = load_decks(source)
+    except DeckConfigError as exc:
+        print(f"PromptDeck: {exc}", file=sys.stderr)
+        return 2
+
+    app = QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("prompt-deck")
     app.setApplicationDisplayName("Prompt Deck")
     app.setDesktopFileName("net.local.prompt-deck")
-    app.setQuitOnLastWindowClosed(not daemon)
+    app.setQuitOnLastWindowClosed(not args.daemon)
 
-    widget = PromptDeck(load_decks(), daemon=daemon)
-    if daemon:
+    widget = PromptDeck(decks, source=source, daemon=args.daemon)
+    if args.daemon:
         widget.start_server()
-        if "--show" in sys.argv:
+        if args.show:
             widget.show_deck()
     else:
         widget.show_deck()

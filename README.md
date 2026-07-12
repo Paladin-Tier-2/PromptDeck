@@ -11,7 +11,7 @@ The interface is built with Qt. On Linux it uses `wl-copy` for the Wayland clipb
 ### Linux
 
 ```bash
-git clone https://github.com/Paladin-Tier-2/PromptDeck.git ~/PromptDeck
+git clone --branch polish https://github.com/Paladin-Tier-2/PromptDeck.git ~/PromptDeck
 cd ~/PromptDeck
 python3 -m venv .venv
 source .venv/bin/activate
@@ -29,7 +29,7 @@ sudo dnf install wl-clipboard libnotify
 ### Windows
 
 ```powershell
-git clone --branch windows-support https://github.com/Paladin-Tier-2/PromptDeck.git
+git clone --branch polish https://github.com/Paladin-Tier-2/PromptDeck.git
 cd PromptDeck
 py -m venv .venv
 .venv\Scripts\Activate.ps1
@@ -87,6 +87,32 @@ python prompt_deck.py --show
 
 If no daemon is running, the same command starts PromptDeck normally.
 
+Use another configuration without moving it into the repository:
+
+```bash
+python prompt_deck.py --config ~/path/to/decks.toml
+```
+
+## Tests
+
+The deck loader is separate from Qt, so its recursive includes and validation can be checked directly:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The test suite can run on Linux and Windows. On Windows, it also checks the native Qt clipboard path.
+
+## Regenerate the demo
+
+The interface demo is generated from the real Qt widget with generic prompts:
+
+```bash
+python scripts/render_demo.py
+```
+
+The script needs `ffmpeg` in addition to the Python dependencies.
+
 ## Platform support
 
-The `main` branch is the Linux/Wayland version I use. This branch adds Windows support, but it still needs testing on a real Windows machine.
+The `main` branch is the original Linux/Wayland version I use. This branch builds on `windows-support` with configuration validation, tests, and interface polish. Windows support still needs a manual test on a real Windows desktop.
