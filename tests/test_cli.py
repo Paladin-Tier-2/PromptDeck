@@ -51,13 +51,13 @@ class CliTests(unittest.TestCase):
                 patch("builtins.print"),
             ):
                 appearance = Appearance(
-                    accent="#7c3aed", card_background="#18181b"
+                    selected_background="#7c3aed", card_background="#18181b"
                 )
                 self.assertEqual(finish_setup(None, appearance, True, False), 0)
                 self.assertEqual(finish_setup(None, Appearance(), False, False), 0)
                 settings = config_dir() / "config.toml"
             text = settings.read_text()
-            self.assertIn('accent = "#7c3aed"', text)
+            self.assertIn('selected_background = "#7c3aed"', text)
             self.assertIn('card_background = "#18181b"', text)
 
     def test_unchecked_autostart_removes_an_existing_service(self):

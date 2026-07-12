@@ -3,8 +3,8 @@
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
@@ -54,18 +54,18 @@ class SetupDialog(QDialog):
     """Collect prompt, appearance, and Linux autostart choices."""
 
     COLOR_ROLES = {
-        "accent": QPalette.Accent,
+        "selected_background": QPalette.Accent,
+        "selected_border": QPalette.Accent,
         "card_background": QPalette.Button,
         "card_border": QPalette.Mid,
-        "selected_border": QPalette.Accent,
         "card_text": QPalette.WindowText,
     }
-    COLOR_HELP = {
-        "accent": "Selected card fill",
-        "card_background": "Other card fill",
-        "card_border": "Other card outline",
-        "selected_border": "Selected card outline",
-        "card_text": "Other card text",
+    COLOR_LABELS = {
+        "selected_background": "Selected background",
+        "selected_border": "Selected outline",
+        "card_background": "Card background",
+        "card_border": "Card outline",
+        "card_text": "Card text",
     }
 
     def __init__(
@@ -89,7 +89,18 @@ class SetupDialog(QDialog):
         self.source = source
         self.appearance = appearance
         self.setWindowTitle("PromptDeck Setup")
-        self.setMinimumSize(1120, 650)
+        self.setMinimumSize(980, 580)
+        self.setStyleSheet(
+            "QPushButton { min-height: 30px; padding: 3px 14px; border-radius: 7px; "
+            "border: 1px solid palette(mid); background: palette(button); }"
+            "QPushButton:hover { border-color: palette(highlight); }"
+            "QPushButton#primaryButton { color: palette(highlighted-text); "
+            "background: palette(highlight); border-color: palette(highlight); }"
+            "QPushButton#colorField { min-width: 110px; text-align: left; "
+            "background: palette(base); }"
+            "QPushButton#resetLink { min-height: 0; padding: 3px; border: none; "
+            "background: transparent; color: palette(link); }"
+        )
 
         self.migrate = QCheckBox()
         self.migrate.setChecked(True)
@@ -103,10 +114,10 @@ class SetupDialog(QDialog):
         self.service.setVisible(allow_service)
 
         self.color_buttons: dict[str, QPushButton] = {}
-        self.system_buttons: dict[str, QPushButton] = {}
+        self.reset_buttons: dict[str, QPushButton] = {}
         self.toml = QPlainTextEdit()
         self.toml.setReadOnly(True)
-        self.toml.setMaximumHeight(180)
+        self.toml.setMaximumHeight(150)
         self.toml.setLineWrapMode(QPlainTextEdit.NoWrap)
 
         preview_config = AppConfig(
@@ -126,7 +137,7 @@ class SetupDialog(QDialog):
             ],
         )
         self.preview = PromptDeck(preview_config, parent=self, embedded=True)
-        self.preview.setMinimumSize(680, 520)
+        self.preview.setMinimumSize(600, 450)
         self.preview.selection_visible = True
 
         self.pages = QStackedWidget()
@@ -137,6 +148,8 @@ class SetupDialog(QDialog):
         self.next_button = QPushButton("Next")
         self.finish_button = QPushButton("Finish setup")
         cancel_button = QPushButton("Cancel")
+        self.next_button.setObjectName("primaryButton")
+        self.finish_button.setObjectName("primaryButton")
         self.back_button.clicked.connect(lambda: self.show_page(0))
         self.next_button.clicked.connect(lambda: self.show_page(1))
         self.finish_button.clicked.connect(self.accept)
@@ -210,48 +223,58 @@ class SetupDialog(QDialog):
         preview_layout.addWidget(self.preview)
 
         settings = QFrame()
+        settings.setMaximumWidth(400)
         settings_layout = QVBoxLayout(settings)
-        settings_layout.setContentsMargins(20, 8, 8, 8)
-        settings_layout.setSpacing(10)
+        settings_layout.setContentsMargins(16, 4, 4, 4)
+        settings_layout.setSpacing(8)
         settings_layout.addWidget(self.heading("Appearance"))
-        help_text = QLabel(
-            "Click a value to choose a color. Use system to follow your desktop theme."
-        )
-        help_text.setWordWrap(True)
-        settings_layout.addWidget(help_text)
         settings_layout.addWidget(self.rule())
 
         for key in APPEARANCE_COLOR_KEYS:
             row = QHBoxLayout()
-            label = QLabel(key)
-            label.setMinimumWidth(145)
-            label.setStyleSheet("font-family: monospace; font-weight: 600")
-            label.setToolTip(self.COLOR_HELP[key])
+            labels = QVBoxLayout()
+            labels.setSpacing(0)
+            title = QLabel(self.COLOR_LABELS[key])
+            title.setStyleSheet("font-weight: 600")
+            config_key = QLabel(key)
+            config_key.setStyleSheet("font-family: monospace; color: palette(mid)")
+            labels.addWidget(title)
+            labels.addWidget(config_key)
             color_button = QPushButton()
+            color_button.setObjectName("colorField")
             color_button.clicked.connect(
                 lambda checked=False, name=key: self.choose_color(name)
             )
-            system_button = QPushButton("Use system")
-            system_button.clicked.connect(
+            reset_button = QPushButton("Reset")
+            reset_button.setObjectName("resetLink")
+            reset_button.clicked.connect(
                 lambda checked=False, name=key: self.use_system_color(name)
             )
             self.color_buttons[key] = color_button
-            self.system_buttons[key] = system_button
-            row.addWidget(label)
-            row.addWidget(color_button, 1)
-            row.addWidget(system_button)
+            self.reset_buttons[key] = reset_button
+            row.addLayout(labels, 1)
+            row.addWidget(color_button)
+            row.addWidget(reset_button)
             settings_layout.addLayout(row)
+            if key == "selected_border":
+                note = QLabel(
+                    "Selected text is automatic: black on light backgrounds, "
+                    "white on dark backgrounds."
+                )
+                note.setWordWrap(True)
+                note.setStyleSheet("color: palette(mid)")
+                settings_layout.addWidget(note)
 
         toml_label = QLabel("config.toml")
         toml_label.setStyleSheet("font-family: monospace; font-weight: 600")
-        settings_layout.addSpacing(4)
+        settings_layout.addSpacing(2)
         settings_layout.addWidget(toml_label)
         settings_layout.addWidget(self.toml)
         settings_layout.addStretch()
 
         layout = QHBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         layout.addWidget(preview_panel, 3)
         layout.addWidget(settings, 2)
         return page
@@ -389,12 +412,12 @@ class SetupDialog(QDialog):
                 if value == "system"
                 else QColor(value)
             )
-            text = "#000000" if color.lightnessF() > 0.55 else "#ffffff"
-            button.setText(value)
-            button.setStyleSheet(
-                f"background: {color.name()}; color: {text}; padding: 5px 10px"
-            )
-            self.system_buttons[key].setEnabled(value != "system")
+            swatch = QPixmap(14, 14)
+            swatch.fill(color)
+            button.setIcon(QIcon(swatch))
+            button.setIconSize(QSize(14, 14))
+            button.setText("System" if value == "system" else value.upper())
+            self.reset_buttons[key].setVisible(value != "system")
         self.preview.update()
 
     def choices(self) -> SetupChoices:

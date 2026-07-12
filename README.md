@@ -57,12 +57,15 @@ version = 1
 deck_source = "decks.toml"
 
 [appearance]
-accent = "system" # or "#7c3aed"
+selected_background = "system" # or "#7c3aed"
+selected_border = "system"
 card_background = "system"
 card_border = "system"
-selected_border = "system"
 card_text = "system"
 ```
+
+Selected-card text is automatic: black on light selected backgrounds and white on
+dark selected backgrounds.
 
 Each deck has a name and cards:
 

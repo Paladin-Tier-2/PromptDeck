@@ -22,10 +22,17 @@ class AppTests(unittest.TestCase):
 
     def test_custom_accent_uses_readable_selected_text(self):
         palette = QPalette()
-        dark = ThemeColors.from_palette(palette, Appearance(accent="#112233"))
-        light = ThemeColors.from_palette(palette, Appearance(accent="#f0eedd"))
+        dark = ThemeColors.from_palette(
+            palette, Appearance(selected_background="#112233")
+        )
+        light = ThemeColors.from_palette(
+            palette, Appearance(selected_background="#f0eedd")
+        )
         self.assertEqual(dark.selected_text, QColor("#ffffff"))
         self.assertEqual(light.selected_text, QColor("#000000"))
+        palette.setColor(QPalette.Accent, QColor("#f0eedd"))
+        system = ThemeColors.from_palette(palette, Appearance())
+        self.assertEqual(system.selected_text, QColor("#000000"))
 
     def test_qt_clipboard_is_primary(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -53,20 +60,22 @@ class AppTests(unittest.TestCase):
         dialog = SetupDialog(source, Appearance(), True)
         choices = dialog.choices()
         self.assertEqual(choices.source, source)
-        self.assertEqual(choices.appearance.accent, "system")
+        self.assertEqual(choices.appearance.selected_background, "system")
         self.assertTrue(choices.install_service)
 
-        dialog.preview_color("accent", QColor("#d946ef"))
+        dialog.preview_color("selected_background", QColor("#d946ef"))
         dialog.preview_color("card_background", QColor("#18181b"))
         self.assertEqual(dialog.preview.theme.accent, QColor("#d946ef"))
         self.assertEqual(dialog.preview.theme.card, QColor("#18181b"))
-        self.assertIn('accent = "#d946ef"', dialog.toml.toPlainText())
+        self.assertIn('selected_background = "#d946ef"', dialog.toml.toPlainText())
         self.assertIn('card_background = "#18181b"', dialog.toml.toPlainText())
         self.assertTrue(dialog.preview.selection_visible)
 
         dialog.show_page(1)
         self.assertFalse(dialog.back_button.isHidden())
         self.assertTrue(dialog.next_button.isHidden())
+        self.assertFalse(dialog.reset_buttons["selected_background"].isHidden())
+        self.assertTrue(dialog.reset_buttons["card_border"].isHidden())
 
 
 if __name__ == "__main__":

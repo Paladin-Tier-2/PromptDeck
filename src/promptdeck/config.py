@@ -41,7 +41,7 @@ class Appearance:
 
     Attributes
     ----------
-    accent : str
+    selected_background : str
         Selected card fill, or ``system``.
     card_background : str
         Unselected card fill, or ``system``.
@@ -53,7 +53,7 @@ class Appearance:
         Unselected card text, or ``system``.
     """
 
-    accent: str = "system"
+    selected_background: str = "system"
     card_background: str = "system"
     card_border: str = "system"
     selected_border: str = "system"
@@ -61,10 +61,10 @@ class Appearance:
 
 
 APPEARANCE_COLOR_KEYS = (
-    "accent",
+    "selected_background",
+    "selected_border",
     "card_background",
     "card_border",
-    "selected_border",
     "card_text",
 )
 
@@ -114,9 +114,9 @@ def load_app_config(path: Path) -> AppConfig:
     theme = appearance_data.get("theme", "system")
     if theme != "system":
         raise DeckConfigError("appearance.theme currently supports only 'system'")
-    colors = {
-        key: appearance_data.get(key, "system") for key in APPEARANCE_COLOR_KEYS
-    }
+    colors = {key: appearance_data.get(key, "system") for key in APPEARANCE_COLOR_KEYS}
+    if "selected_background" not in appearance_data:
+        colors["selected_background"] = appearance_data.get("accent", "system")
     for key, value in colors.items():
         if not valid_color(value):
             raise DeckConfigError(

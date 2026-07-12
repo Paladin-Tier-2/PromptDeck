@@ -133,7 +133,7 @@ def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
         )
         return finish_setup(
             source,
-            Appearance(accent=args.accent or "system"),
+            Appearance(selected_background=args.accent or "system"),
             args.accent is not None,
             service_choice,
         )
@@ -170,7 +170,9 @@ def terminal_setup(args: argparse.Namespace, source: Path | None) -> int:
     service_choice = (
         True if sys.platform.startswith("linux") and not args.no_service else None
     )
-    return finish_setup(source, Appearance(accent=accent), True, service_choice)
+    return finish_setup(
+        source, Appearance(selected_background=accent), True, service_choice
+    )
 
 
 def graphical_setup(
@@ -209,7 +211,7 @@ def graphical_setup(
         except DeckConfigError:
             pass
     if args.accent is not None:
-        appearance = replace(appearance, accent=args.accent)
+        appearance = replace(appearance, selected_background=args.accent)
 
     manage_service = sys.platform.startswith("linux") and not args.no_service
     dialog = SetupDialog(source, appearance, manage_service)

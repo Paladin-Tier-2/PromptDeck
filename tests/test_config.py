@@ -28,7 +28,7 @@ class ConfigTests(unittest.TestCase):
             )
             (root / "decks.toml").write_text(DECK, encoding="utf-8")
             config = load_app_config(root / "config.toml")
-            self.assertEqual(config.appearance.accent, "#336699")
+            self.assertEqual(config.appearance.selected_background, "#336699")
             self.assertEqual(config.appearance.card_background, "#18181b")
             self.assertEqual(config.decks[0].cards[0].body, "Make this shorter.\n")
 
@@ -48,7 +48,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "config.toml").write_text('[appearance]\naccent = "blue"\n', encoding="utf-8")
-            with self.assertRaisesRegex(DeckConfigError, "accent"):
+            with self.assertRaisesRegex(DeckConfigError, "selected_background"):
                 load_app_config(root / "config.toml")
 
     def test_rejects_invalid_card_color(self):

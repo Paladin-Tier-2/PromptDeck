@@ -72,15 +72,13 @@ class ThemeColors:
         def color(value: str, role: QPalette.ColorRole) -> QColor:
             return palette.color(role) if value == "system" else QColor(value)
 
-        accent = color(appearance.accent, QPalette.Accent)
-        selected_text = palette.color(QPalette.HighlightedText)
-        if appearance.accent != "system":
-            luminance = (
-                0.2126 * accent.red()
-                + 0.7152 * accent.green()
-                + 0.0722 * accent.blue()
-            ) / 255
-            selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
+        accent = color(appearance.selected_background, QPalette.Accent)
+        luminance = (
+            0.2126 * accent.red()
+            + 0.7152 * accent.green()
+            + 0.0722 * accent.blue()
+        ) / 255
+        selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
         return cls(
             color(appearance.card_text, QPalette.WindowText),
             color(appearance.card_text, QPalette.Text),
