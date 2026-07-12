@@ -103,8 +103,16 @@ def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
     """Run graphical setup by default, with terminal and unattended modes."""
     source = args.migrate.expanduser().resolve() if args.migrate else detect_legacy()
     if args.yes:
+        service_choice = (
+            True
+            if sys.platform.startswith("linux") and not args.no_service
+            else None
+        )
         return finish_setup(
-            args, source, args.accent or "system", args.accent is not None
+            source,
+            args.accent or "system",
+            args.accent is not None,
+            service_choice,
         )
     if args.terminal:
         return terminal_setup(args, source)
@@ -123,62 +131,49 @@ def terminal_setup(args: argparse.Namespace, source: Path | None) -> int:
         or input("Accent [system or #RRGGBB] (system): ").strip()
         or "system"
     )
-    return finish_setup(args, source, accent, True)
+    service_choice = (
+        True if sys.platform.startswith("linux") and not args.no_service else None
+    )
+    return finish_setup(source, accent, True, service_choice)
 
 
 def graphical_setup(args: argparse.Namespace, source: Path | None, qt_args: list[str]) -> int:
     """Collect migration and accent choices with native Qt dialogs."""
-    from PySide6.QtGui import QPalette
-    from PySide6.QtWidgets import QApplication, QColorDialog, QMessageBox
+    from PySide6.QtWidgets import QApplication, QDialog
+
+    from .setup_ui import SetupDialog
 
     app = QApplication.instance() or QApplication(["promptdeck-setup", *qt_args])
     app.setApplicationName("promptdeck")
     app.setApplicationDisplayName("PromptDeck Setup")
     app.setDesktopFileName("promptdeck")
 
-    if source:
-        answer = QMessageBox.question(
-            None,
-            "PromptDeck Setup",
-            f"Copy your existing prompts from\n{source}?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes,
-        )
-        if answer == QMessageBox.Cancel:
-            return 1
-        if answer == QMessageBox.No:
-            source = None
+    accent = args.accent or "system"
+    settings = config_path(args.config)
+    if args.accent is None and settings.exists():
+        try:
+            accent = load_app_config(settings).appearance.accent
+        except DeckConfigError:
+            pass
 
-    accent = args.accent
-    if accent is None:
-        choice = QMessageBox()
-        choice.setWindowTitle("PromptDeck Setup")
-        choice.setText("Choose the color for the selected card.")
-        system_button = choice.addButton("Use system color", QMessageBox.AcceptRole)
-        color_button = choice.addButton("Choose a color...", QMessageBox.ActionRole)
-        choice.addButton(QMessageBox.Cancel)
-        choice.exec()
-        if choice.clickedButton() == system_button:
-            accent = "system"
-        elif choice.clickedButton() == color_button:
-            color = QColorDialog.getColor(
-                app.palette().color(QPalette.Accent),
-                None,
-                "PromptDeck Accent",
-            )
-            if not color.isValid():
-                return 1
-            accent = color.name()
-        else:
-            return 1
-    return finish_setup(args, source, accent, True)
+    manage_service = sys.platform.startswith("linux") and not args.no_service
+    dialog = SetupDialog(source, accent, manage_service)
+    if dialog.exec() != QDialog.Accepted:
+        return 1
+    choices = dialog.choices()
+    return finish_setup(
+        choices.source,
+        choices.accent,
+        True,
+        choices.install_service if manage_service else None,
+    )
 
 
 def finish_setup(
-    args: argparse.Namespace,
     source: Path | None,
     accent: str,
     update_accent: bool,
+    service_choice: bool | None,
 ) -> int:
     """Write setup choices without overwriting existing prompt files."""
     directory = config_dir()
@@ -200,9 +195,17 @@ def finish_setup(
             encoding="utf-8",
         )
     install_desktop_entry()
-    if sys.platform.startswith("linux") and not args.no_service:
-        service("install")
-        service("restart")
+    if service_choice is True:
+        result = service("install")
+        if result:
+            return result
+        result = service("restart")
+        if result:
+            return result
+    elif service_choice is False and service_path().exists():
+        result = service("uninstall")
+        if result:
+            return result
     print(f"PromptDeck config: {settings}")
     print_shortcut_help()
     return 0
@@ -304,9 +307,10 @@ def install_desktop_entry() -> None:
 
 def print_shortcut_help() -> None:
     """Print the command users can bind in their desktop settings."""
-    print("Shortcut command: promptdeck")
+    command = executable()
+    print(f"Shortcut command: {command}")
     if sys.platform.startswith("linux"):
         print("KDE: System Settings > Keyboard > Shortcuts > Add Command")
-        print('Hyprland: bind = SUPER, P, exec, promptdeck')
+        print(f"Hyprland: bind = SUPER, P, exec, {command}")
     elif sys.platform == "win32":
         print("Windows: create a shortcut whose target is promptdeck.cmd")

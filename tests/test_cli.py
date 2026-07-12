@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from promptdeck.cli import copy_tree_without_overwrite, parser, service_unit
+from promptdeck.cli import (
+    copy_tree_without_overwrite,
+    finish_setup,
+    parser,
+    service_unit,
+)
 
 
 class CliTests(unittest.TestCase):
@@ -30,6 +35,42 @@ class CliTests(unittest.TestCase):
         self.assertIn("ExecStart=/opt/promptdeck/bin/promptdeck daemon", unit)
         self.assertIn("Restart=on-failure", unit)
         self.assertNotIn("Environment=", unit)
+
+    def test_repeated_setup_preserves_an_explicit_accent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "XDG_CONFIG_HOME": str(root / "config"),
+                "XDG_DATA_HOME": str(root / "data"),
+            }
+            with (
+                patch.dict("os.environ", environment),
+                patch("promptdeck.cli.print_shortcut_help"),
+                patch("builtins.print"),
+            ):
+                self.assertEqual(finish_setup(None, "#7c3aed", True, False), 0)
+                self.assertEqual(finish_setup(None, "system", False, False), 0)
+            settings = root / "config" / "promptdeck" / "config.toml"
+            self.assertIn('accent = "#7c3aed"', settings.read_text())
+
+    def test_unchecked_autostart_removes_an_existing_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "XDG_CONFIG_HOME": str(root / "config"),
+                "XDG_DATA_HOME": str(root / "data"),
+            }
+            unit = root / "config" / "systemd" / "user" / "promptdeck.service"
+            unit.parent.mkdir(parents=True)
+            unit.touch()
+            with (
+                patch.dict("os.environ", environment),
+                patch("promptdeck.cli.service") as service,
+                patch("promptdeck.cli.print_shortcut_help"),
+                patch("builtins.print"),
+            ):
+                finish_setup(None, "system", True, False)
+            service.assert_called_once_with("uninstall")
 
 
 if __name__ == "__main__":

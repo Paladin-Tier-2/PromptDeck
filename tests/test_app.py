@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from promptdeck.app import PromptDeck, ThemeColors
 from promptdeck.config import AppConfig, Appearance, Card, Deck
+from promptdeck.setup_ui import SetupDialog
 
 
 class AppTests(unittest.TestCase):
@@ -46,6 +47,18 @@ class AppTests(unittest.TestCase):
                 widget.has_been_active = True
                 widget.focusOutEvent(event)
                 close.assert_called_once()
+
+    def test_setup_dialog_returns_visible_choices(self):
+        source = Path("/tmp/existing/decks.toml")
+        dialog = SetupDialog(source, "system", True)
+        choices = dialog.choices()
+        self.assertEqual(choices.source, source)
+        self.assertEqual(choices.accent, "system")
+        self.assertTrue(choices.install_service)
+
+        dialog.custom_accent.setChecked(True)
+        dialog.accent = "#7c3aed"
+        self.assertEqual(dialog.choices().accent, "#7c3aed")
 
 
 if __name__ == "__main__":

@@ -19,9 +19,10 @@ The isolated Linux installer keeps the application out of your project folders:
 curl -fsSL https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.sh | sh
 ```
 
-On Windows, download `install.ps1`, then run:
+On Windows, download and run the installer:
 
 ```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 

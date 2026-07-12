@@ -42,7 +42,6 @@ def socket_path() -> Path:
 class ThemeColors:
     """Colors derived from the active Qt palette and accent setting."""
 
-    window: QColor
     text: QColor
     body_text: QColor
     card: QColor
@@ -67,7 +66,6 @@ class ThemeColors:
             ) / 255
             selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
         return cls(
-            palette.color(QPalette.Window),
             palette.color(QPalette.WindowText),
             palette.color(QPalette.Text),
             palette.color(QPalette.Button),
