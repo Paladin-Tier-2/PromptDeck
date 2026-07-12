@@ -9,6 +9,7 @@ from promptdeck.cli import (
     parser,
     service_unit,
 )
+from promptdeck.config import config_dir
 
 
 class CliTests(unittest.TestCase):
@@ -42,6 +43,7 @@ class CliTests(unittest.TestCase):
             environment = {
                 "XDG_CONFIG_HOME": str(root / "config"),
                 "XDG_DATA_HOME": str(root / "data"),
+                "APPDATA": str(root / "config"),
             }
             with (
                 patch.dict("os.environ", environment),
@@ -50,7 +52,7 @@ class CliTests(unittest.TestCase):
             ):
                 self.assertEqual(finish_setup(None, "#7c3aed", True, False), 0)
                 self.assertEqual(finish_setup(None, "system", False, False), 0)
-            settings = root / "config" / "promptdeck" / "config.toml"
+                settings = config_dir() / "config.toml"
             self.assertIn('accent = "#7c3aed"', settings.read_text())
 
     def test_unchecked_autostart_removes_an_existing_service(self):
@@ -59,6 +61,7 @@ class CliTests(unittest.TestCase):
             environment = {
                 "XDG_CONFIG_HOME": str(root / "config"),
                 "XDG_DATA_HOME": str(root / "data"),
+                "APPDATA": str(root / "config"),
             }
             unit = root / "config" / "systemd" / "user" / "promptdeck.service"
             unit.parent.mkdir(parents=True)
