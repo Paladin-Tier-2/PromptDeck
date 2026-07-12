@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Paladin-Tier-2" }]
-dependencies = ["PySide6-Essentials>=6.7"]
+dependencies = [
+  "PySide6-Essentials>=6.7",
+  "tomli>=2; python_version < '3.11'",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: X11 Applications :: Qt",

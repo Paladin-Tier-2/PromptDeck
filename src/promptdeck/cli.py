@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .app import QApplication, PromptDeck, request_existing_daemon
 from .config import DeckConfigError, config_dir, config_path, load_app_config, valid_accent
 
 
@@ -45,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         return setup(args)
     if args.command == "service":
         return service(args.action)
+
+    from .app import QApplication, PromptDeck, request_existing_daemon
 
     path = config_path(args.config)
     if args.command is None and args.config is None and request_existing_daemon():
