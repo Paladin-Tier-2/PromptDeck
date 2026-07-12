@@ -1,4 +1,3 @@
-/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 import subprocess
 import sys
 import tempfile

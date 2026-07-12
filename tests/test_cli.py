@@ -1,4 +1,3 @@
-/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 import tempfile
 import unittest
 from pathlib import Path

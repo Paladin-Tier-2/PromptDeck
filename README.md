@@ -1,4 +1,3 @@
-/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 # PromptDeck
 
 PromptDeck is a small keyboard-first prompt picker. It opens over the current screen, copies a saved prompt, and gets out of the way. Its light/dark colors and default accent come from the desktop's Qt palette; an optional `#RRGGBB` accent can override only the selection color.

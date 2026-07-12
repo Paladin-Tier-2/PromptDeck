@@ -1,4 +1,3 @@
-/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 $ErrorActionPreference = "Stop"
 
 $Root = Join-Path $env:LOCALAPPDATA "PromptDeck"

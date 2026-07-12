@@ -1,4 +1,3 @@
-/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 #!/usr/bin/env python3
 import math
 import os
