@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ["3.10", "3.13"]
@@ -38,6 +39,7 @@ jobs:
 
   installer:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -52,7 +54,7 @@ jobs:
           XDG_CONFIG_HOME="$RUNNER_TEMP/config" \
           XDG_DATA_HOME="$RUNNER_TEMP/data" \
           XDG_BIN_HOME="$RUNNER_TEMP/bin" \
-          ./install.sh --yes --no-service
+          sh ./install.sh --yes --no-service
           "$RUNNER_TEMP/bin/promptdeck" --help
       - if: runner.os == 'Windows'
         shell: pwsh
