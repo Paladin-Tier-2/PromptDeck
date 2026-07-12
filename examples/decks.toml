@@ -1,0 +1,26 @@
+[[decks]]
+name = "Writing"
+
+[[decks.cards]]
+title = "Make concise"
+key = "C"
+body = """
+Make this shorter without changing its meaning.
+"""
+
+[[decks.cards]]
+title = "Check clarity"
+key = "R"
+body = """
+Review this text for unclear wording. Point out the problem before suggesting a revision.
+"""
+
+[[decks]]
+name = "Code"
+
+[[decks.cards]]
+title = "Explain error"
+key = "E"
+body = """
+Explain what caused this error, then show the smallest useful fix.
+"""

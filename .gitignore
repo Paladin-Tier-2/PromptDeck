@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local prompt collections. These can contain personal information.
+/decks.toml
+/decks/
+
+# Local development notes.
+/Handover/
+.playwright-mcp/
+
+# Editor and operating-system files.
+.idea/
+.vscode/
+.DS_Store
