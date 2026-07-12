@@ -1,3 +1,5 @@
+"""Load PromptDeck settings and deck files from native config paths."""
+
 import glob
 import os
 import re
@@ -11,11 +13,15 @@ from pathlib import Path
 
 
 class DeckConfigError(ValueError):
+    """Raised when a settings or deck file is missing or invalid."""
+
     pass
 
 
 @dataclass(frozen=True)
 class Card:
+    """One selectable prompt card."""
+
     title: str
     body: str
     key: str = ""
@@ -23,18 +29,24 @@ class Card:
 
 @dataclass(frozen=True)
 class Deck:
+    """A named collection of prompt cards."""
+
     name: str
     cards: list[Card]
 
 
 @dataclass(frozen=True)
 class Appearance:
+    """User-selected theme and accent settings."""
+
     theme: str = "system"
     accent: str = "system"
 
 
 @dataclass(frozen=True)
 class AppConfig:
+    """Resolved settings, source paths, appearance, and decks."""
+
     path: Path
     deck_source: Path
     appearance: Appearance
@@ -42,12 +54,14 @@ class AppConfig:
 
 
 def config_dir() -> Path:
+    """Return the native per-user PromptDeck config directory."""
     if sys.platform == "win32":
         return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "PromptDeck"
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "promptdeck"
 
 
 def config_path(explicit: Path | None = None) -> Path:
+    """Resolve config precedence: argument, environment, then native default."""
     if explicit is not None:
         return explicit.expanduser().resolve()
     configured = os.environ.get("PROMPTDECK_CONFIG")
@@ -55,6 +69,7 @@ def config_path(explicit: Path | None = None) -> Path:
 
 
 def load_app_config(path: Path) -> AppConfig:
+    """Load app settings and the deck source they reference."""
     path = path.expanduser().resolve()
     data = _read_toml(path)
     # A direct deck file remains useful for --config and safe migration.
@@ -81,10 +96,12 @@ def load_app_config(path: Path) -> AppConfig:
 
 
 def valid_accent(value: object) -> bool:
+    """Return whether *value* is ``system`` or a six-digit hex color."""
     return isinstance(value, str) and (value == "system" or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None)
 
 
 def load_decks(source: Path) -> list[Deck]:
+    """Load and validate every deck reachable from *source*."""
     source = source.expanduser().resolve()
     if not source.is_file():
         raise DeckConfigError(f"Configuration not found: {source}")

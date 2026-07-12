@@ -1,5 +1,8 @@
+"""Command-line entry point, first-run setup, and Linux service controls."""
+
 import argparse
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -24,26 +27,48 @@ body = "Review this text for unclear wording before suggesting a revision."
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="promptdeck", description="Open a keyboard-first prompt picker.")
+    """Build the public command-line interface."""
+    result = argparse.ArgumentParser(
+        prog="promptdeck", description="Open a keyboard-first prompt picker."
+    )
     result.add_argument("--config", type=Path, help="config.toml or a deck TOML file")
     commands = result.add_subparsers(dest="command")
     commands.add_parser("daemon", help="run the warm foreground daemon")
-    setup = commands.add_parser("setup", help="create config and optional Linux integration")
-    setup.add_argument("--yes", action="store_true", help="accept safe defaults without prompting")
-    setup.add_argument("--no-service", action="store_true", help="do not install the Linux user service")
+    setup = commands.add_parser(
+        "setup", help="create config and optional Linux integration"
+    )
+    setup.add_argument(
+        "--yes", action="store_true", help="accept safe defaults without prompting"
+    )
+    setup.add_argument(
+        "--no-service", action="store_true", help="do not install the Linux user service"
+    )
     setup.add_argument("--accent", default=None, help="system or #RRGGBB")
-    setup.add_argument("--migrate", type=Path, help="copy an existing decks.toml and sibling decks directory")
+    setup.add_argument(
+        "--migrate",
+        type=Path,
+        help="copy an existing decks.toml and sibling decks directory",
+    )
+    setup.add_argument(
+        "--terminal", action="store_true", help="use terminal prompts instead of Qt dialogs"
+    )
     service = commands.add_parser("service", help="manage the Linux user service")
-    service.add_argument("action", choices=("install", "start", "stop", "restart", "status", "uninstall"))
+    service.add_argument(
+        "action",
+        choices=("install", "start", "stop", "restart", "status", "uninstall"),
+    )
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run a CLI command or open the PromptDeck overlay."""
     args, qt_args = parser().parse_known_args(argv)
     if args.command == "setup":
-        return setup(args)
+        return setup(args, qt_args)
     if args.command == "service":
         return service(args.action)
+
+    from PySide6.QtCore import QTimer
 
     from .app import QApplication, PromptDeck, request_existing_daemon
 
@@ -59,7 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(["promptdeck", *qt_args])
     app.setApplicationName("promptdeck")
     app.setApplicationDisplayName("PromptDeck")
-    app.setDesktopFileName("io.github.paladin-tier-2.promptdeck")
+    app.setDesktopFileName("promptdeck")
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    signal_timer = QTimer()
+    signal_timer.timeout.connect(lambda: None)
+    signal_timer.start(250)
     daemon = args.command == "daemon"
     app.setQuitOnLastWindowClosed(not daemon)
     widget = PromptDeck(config, daemon=daemon)
@@ -70,14 +99,90 @@ def main(argv: list[str] | None = None) -> int:
     return app.exec()
 
 
-def setup(args: argparse.Namespace) -> int:
-    directory = config_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
+    """Run graphical setup by default, with terminal and unattended modes."""
     source = args.migrate.expanduser().resolve() if args.migrate else detect_legacy()
-    if source and not args.yes:
+    if args.yes:
+        return finish_setup(
+            args, source, args.accent or "system", args.accent is not None
+        )
+    if args.terminal:
+        return terminal_setup(args, source)
+    install_desktop_entry()
+    return graphical_setup(args, source, qt_args or [])
+
+
+def terminal_setup(args: argparse.Namespace, source: Path | None) -> int:
+    """Collect migration and accent choices in the terminal."""
+    if source:
         answer = input(f"Copy prompts from {source}? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
             source = None
+    accent = (
+        args.accent
+        or input("Accent [system or #RRGGBB] (system): ").strip()
+        or "system"
+    )
+    return finish_setup(args, source, accent, True)
+
+
+def graphical_setup(args: argparse.Namespace, source: Path | None, qt_args: list[str]) -> int:
+    """Collect migration and accent choices with native Qt dialogs."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication, QColorDialog, QMessageBox
+
+    app = QApplication.instance() or QApplication(["promptdeck-setup", *qt_args])
+    app.setApplicationName("promptdeck")
+    app.setApplicationDisplayName("PromptDeck Setup")
+    app.setDesktopFileName("promptdeck")
+
+    if source:
+        answer = QMessageBox.question(
+            None,
+            "PromptDeck Setup",
+            f"Copy your existing prompts from\n{source}?",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if answer == QMessageBox.Cancel:
+            return 1
+        if answer == QMessageBox.No:
+            source = None
+
+    accent = args.accent
+    if accent is None:
+        choice = QMessageBox()
+        choice.setWindowTitle("PromptDeck Setup")
+        choice.setText("Choose the color for the selected card.")
+        system_button = choice.addButton("Use system color", QMessageBox.AcceptRole)
+        color_button = choice.addButton("Choose a color...", QMessageBox.ActionRole)
+        choice.addButton(QMessageBox.Cancel)
+        choice.exec()
+        if choice.clickedButton() == system_button:
+            accent = "system"
+        elif choice.clickedButton() == color_button:
+            color = QColorDialog.getColor(
+                app.palette().color(QPalette.Accent),
+                None,
+                "PromptDeck Accent",
+            )
+            if not color.isValid():
+                return 1
+            accent = color.name()
+        else:
+            return 1
+    return finish_setup(args, source, accent, True)
+
+
+def finish_setup(
+    args: argparse.Namespace,
+    source: Path | None,
+    accent: str,
+    update_accent: bool,
+) -> int:
+    """Write setup choices without overwriting existing prompt files."""
+    directory = config_dir()
+    directory.mkdir(parents=True, exist_ok=True)
     decks = directory / "decks.toml"
     if source and source.is_file():
         copy_without_overwrite(source, decks)
@@ -85,15 +190,11 @@ def setup(args: argparse.Namespace) -> int:
     elif not decks.exists():
         decks.write_text(SAMPLE_DECKS, encoding="utf-8")
 
-    accent = args.accent
-    if accent is None and not args.yes:
-        accent = input("Accent color [system or #RRGGBB] (system): ").strip() or "system"
-    accent = accent or "system"
     if not valid_accent(accent):
         print("PromptDeck: accent must be 'system' or #RRGGBB", file=sys.stderr)
         return 2
     settings = directory / "config.toml"
-    if not settings.exists() or args.accent is not None:
+    if not settings.exists() or update_accent:
         settings.write_text(
             f'version = 1\ndeck_source = "decks.toml"\n\n[appearance]\ntheme = "system"\naccent = "{accent}"\n',
             encoding="utf-8",
@@ -108,13 +209,19 @@ def setup(args: argparse.Namespace) -> int:
 
 
 def detect_legacy() -> Path | None:
-    for candidate in (Path.home() / "PromptDeck" / "decks.toml", Path.home() / ".config" / "prompt-deck" / "decks.toml"):
+    """Find the first supported legacy deck file."""
+    candidates = (
+        Path.home() / "PromptDeck" / "decks.toml",
+        Path.home() / ".config" / "prompt-deck" / "decks.toml",
+    )
+    for candidate in candidates:
         if candidate.is_file():
             return candidate
     return None
 
 
 def copy_without_overwrite(source: str | Path, target: str | Path) -> str:
+    """Copy one file unless the destination already exists."""
     source, target = Path(source), Path(target)
     if not target.exists():
         shutil.copy2(source, target)
@@ -122,20 +229,32 @@ def copy_without_overwrite(source: str | Path, target: str | Path) -> str:
 
 
 def copy_tree_without_overwrite(source: Path, target: Path) -> None:
+    """Copy a deck directory while preserving every existing file."""
     if source.is_dir():
-        shutil.copytree(source, target, dirs_exist_ok=True, copy_function=copy_without_overwrite)
+        shutil.copytree(
+            source,
+            target,
+            dirs_exist_ok=True,
+            copy_function=copy_without_overwrite,
+        )
 
 
 def executable() -> Path:
+    """Return the absolute path to the installed PromptDeck command."""
     found = shutil.which("promptdeck")
     return Path(found or sys.argv[0]).expanduser().resolve()
 
 
 def service_path() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd" / "user" / "promptdeck.service"
+    """Return the systemd user-unit path."""
+    config_home = Path(
+        os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
+    )
+    return config_home / "systemd" / "user" / "promptdeck.service"
 
 
 def service(action: str) -> int:
+    """Install or control the Linux systemd user service."""
     if not sys.platform.startswith("linux"):
         print("PromptDeck user-service management is available on Linux only.", file=sys.stderr)
         return 2
@@ -154,10 +273,12 @@ def service(action: str) -> int:
 
 
 def run_systemctl(*args: str) -> int:
+    """Run one systemctl user command and return its exit code."""
     return subprocess.run(["systemctl", "--user", *args], check=False).returncode
 
 
 def service_unit(command: Path) -> str:
+    """Render a user service for an installed PromptDeck command."""
     return (
         "[Unit]\nDescription=PromptDeck warm launcher\nAfter=graphical-session.target\nPartOf=graphical-session.target\n\n"
         f"[Service]\nType=simple\nExecStart={command} daemon\nRestart=on-failure\nRestartSec=3\n\n"
@@ -166,9 +287,13 @@ def service_unit(command: Path) -> str:
 
 
 def install_desktop_entry() -> None:
+    """Install the Linux desktop entry used by launchers and portals."""
     if not sys.platform.startswith("linux"):
         return
-    path = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "applications" / "promptdeck.desktop"
+    data_home = Path(
+        os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+    )
+    path = data_home / "applications" / "promptdeck.desktop"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "[Desktop Entry]\nType=Application\nName=PromptDeck\nComment=Open the prompt picker\n"
@@ -178,6 +303,7 @@ def install_desktop_entry() -> None:
 
 
 def print_shortcut_help() -> None:
+    """Print the command users can bind in their desktop settings."""
     print("Shortcut command: promptdeck")
     if sys.platform.startswith("linux"):
         print("KDE: System Settings > Keyboard > Shortcuts > Add Command")

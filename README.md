@@ -11,6 +11,8 @@ pip install promptdeck-qt
 promptdeck setup
 ```
 
+Setup uses native dialogs for migration and color selection. Use `promptdeck setup --terminal` if you prefer terminal prompts, or `--yes` for unattended setup.
+
 The isolated Linux installer keeps the application out of your project folders:
 
 ```bash

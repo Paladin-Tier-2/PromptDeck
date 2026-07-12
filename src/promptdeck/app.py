@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+"""Qt overlay, palette handling, clipboard access, and daemon socket."""
+
 import math
 import os
 import shutil
@@ -30,6 +31,7 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 def socket_path() -> Path:
+    """Return the per-user daemon socket path."""
     if IS_WINDOWS:
         return Path(tempfile.gettempdir()) / "promptdeck.sock"
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -38,6 +40,8 @@ def socket_path() -> Path:
 
 @dataclass(frozen=True)
 class ThemeColors:
+    """Colors derived from the active Qt palette and accent setting."""
+
     window: QColor
     text: QColor
     body_text: QColor
@@ -48,12 +52,19 @@ class ThemeColors:
     error: QColor
 
     @classmethod
-    def from_palette(cls, palette: QPalette, accent: str = "system"):
+    def from_palette(
+        cls, palette: QPalette, accent: str = "system"
+    ) -> "ThemeColors":
+        """Build overlay colors from a Qt palette and optional hex accent."""
         accent_color = palette.color(QPalette.Accent)
         selected_text = palette.color(QPalette.HighlightedText)
         if accent != "system":
             accent_color = QColor(accent)
-            luminance = (0.2126 * accent_color.red() + 0.7152 * accent_color.green() + 0.0722 * accent_color.blue()) / 255
+            luminance = (
+                0.2126 * accent_color.red()
+                + 0.7152 * accent_color.green()
+                + 0.0722 * accent_color.blue()
+            ) / 255
             selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
         return cls(
             palette.color(QPalette.Window),
@@ -67,14 +78,17 @@ class ThemeColors:
         )
 
     def alpha(self, color: QColor, opacity: int) -> QColor:
+        """Return a copy of *color* with the requested opacity."""
         result = QColor(color)
         result.setAlpha(opacity)
         return result
 
     def lighter(self, factor: int) -> QColor:
+        """Return a lighter accent color."""
         return self.accent.lighter(factor)
 
     def darker(self, factor: int) -> QColor:
+        """Return a darker accent color."""
         return self.accent.darker(factor)
 
 
@@ -100,25 +114,18 @@ class PromptDeck(QWidget):
     """Qt widget that displays and controls the prompt deck UI."""
 
     def __init__(self, config: AppConfig, daemon: bool = False):
-        """Create the prompt deck window.
-
-        Parameters
-        ----------
-        decks : list[Deck]
-            Decks available in the UI.
-        source : Path
-            TOML file reloaded each time the window opens.
-        daemon : bool
-            When ``True``, closing the window hides it instead of quitting.
-        """
+        """Create an overlay from resolved config; daemon windows hide on close."""
         super().__init__()
         self.config_path = config.path
         self.decks = config.decks
-        self.theme = ThemeColors.from_palette(QApplication.palette(), config.appearance.accent)
+        self.theme = ThemeColors.from_palette(
+            QApplication.palette(), config.appearance.accent
+        )
         self.daemon = daemon
         self.deck_index = 0
         self.card_index = 0
         self.selection_visible = False
+        self.has_been_active = False
         self.status = ""
         self.server_socket = None
         self.server_notifier = None
@@ -169,12 +176,15 @@ class PromptDeck(QWidget):
         try:
             config = load_app_config(self.config_path)
             self.decks = config.decks
-            self.theme = ThemeColors.from_palette(QApplication.palette(), config.appearance.accent)
+            self.theme = ThemeColors.from_palette(
+                QApplication.palette(), config.appearance.accent
+            )
             self.deck_index = 0
             self.card_index = 0
             self.status = ""
         except Exception as exc:
             self.status = f"Load failed: {exc}"
+        self.has_been_active = False
         self.move_to_cursor_screen()
         self.show()
         self.raise_()
@@ -282,7 +292,7 @@ class PromptDeck(QWidget):
         super().changeEvent(event)
 
     def focusOutEvent(self, event):
-        """Hide selection and close the window when focus is lost.
+        """Close after real focus loss, not a denied startup activation.
 
         Parameters
         ----------
@@ -291,7 +301,8 @@ class PromptDeck(QWidget):
         """
         self.selection_visible = False
         self.update()
-        self.close()
+        if self.has_been_active:
+            self.close()
         super().focusOutEvent(event)
 
     def focusInEvent(self, event):
@@ -302,6 +313,7 @@ class PromptDeck(QWidget):
         event : QFocusEvent
             Qt focus event passed by the window system.
         """
+        self.has_been_active = True
         self.selection_visible = True
         self.update()
         super().focusInEvent(event)
