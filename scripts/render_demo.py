@@ -9,10 +9,10 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 
-from deck_config import Card, Deck  # noqa: E402
-from prompt_deck import QApplication, PromptDeck  # noqa: E402
+from promptdeck.app import QApplication, PromptDeck  # noqa: E402
+from promptdeck.config import AppConfig, Appearance, Card, Deck  # noqa: E402
 
 
 def demo_decks() -> list[Deck]:
@@ -72,7 +72,8 @@ def save_frames(widget: PromptDeck, directory: Path):
 
 def main():
     app = QApplication([])
-    widget = PromptDeck(demo_decks(), source=Path("unused.toml"))
+    source = Path("unused.toml")
+    widget = PromptDeck(AppConfig(source, source, Appearance(), demo_decks()))
     widget.setGeometry(0, 0, 960, 540)
     widget.selection_visible = True
     widget.show()

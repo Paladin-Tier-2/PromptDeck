@@ -1,6 +1,10 @@
+/home/eko/.bashrc: line 104: bind: warning: line editing not enabled
 .venv/
 __pycache__/
 *.py[cod]
+build/
+dist/
+*.egg-info/
 
 # Local prompt collections. These can contain personal information.
 /decks.toml
