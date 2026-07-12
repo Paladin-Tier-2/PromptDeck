@@ -21,12 +21,15 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "config.toml").write_text(
-                'version = 1\ndeck_source = "decks.toml"\n[appearance]\ntheme = "system"\naccent = "#336699"\n',
+                'version = 1\ndeck_source = "decks.toml"\n'
+                '[appearance]\ntheme = "system"\naccent = "#336699"\n'
+                'card_background = "#18181b"\n',
                 encoding="utf-8",
             )
             (root / "decks.toml").write_text(DECK, encoding="utf-8")
             config = load_app_config(root / "config.toml")
             self.assertEqual(config.appearance.accent, "#336699")
+            self.assertEqual(config.appearance.card_background, "#18181b")
             self.assertEqual(config.decks[0].cards[0].body, "Make this shorter.\n")
 
     def test_explicit_config_precedes_environment(self):
@@ -46,6 +49,15 @@ class ConfigTests(unittest.TestCase):
             root = Path(directory)
             (root / "config.toml").write_text('[appearance]\naccent = "blue"\n', encoding="utf-8")
             with self.assertRaisesRegex(DeckConfigError, "accent"):
+                load_app_config(root / "config.toml")
+
+    def test_rejects_invalid_card_color(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.toml").write_text(
+                '[appearance]\ncard_border = "gray"\n', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(DeckConfigError, "card_border"):
                 load_app_config(root / "config.toml")
 
 

@@ -37,10 +37,36 @@ class Deck:
 
 @dataclass(frozen=True)
 class Appearance:
-    """User-selected theme and accent settings."""
+    """Colors used to draw the overlay.
 
-    theme: str = "system"
+    Attributes
+    ----------
+    accent : str
+        Selected card fill, or ``system``.
+    card_background : str
+        Unselected card fill, or ``system``.
+    card_border : str
+        Unselected card outline, or ``system``.
+    selected_border : str
+        Selected card outline, or ``system``.
+    card_text : str
+        Unselected card text, or ``system``.
+    """
+
     accent: str = "system"
+    card_background: str = "system"
+    card_border: str = "system"
+    selected_border: str = "system"
+    card_text: str = "system"
+
+
+APPEARANCE_COLOR_KEYS = (
+    "accent",
+    "card_background",
+    "card_border",
+    "selected_border",
+    "card_text",
+)
 
 
 @dataclass(frozen=True)
@@ -86,18 +112,77 @@ def load_app_config(path: Path) -> AppConfig:
     if not isinstance(appearance_data, dict):
         raise DeckConfigError(f"'appearance' must be a table in {path}")
     theme = appearance_data.get("theme", "system")
-    accent = appearance_data.get("accent", "system")
     if theme != "system":
         raise DeckConfigError("appearance.theme currently supports only 'system'")
-    if not valid_accent(accent):
-        raise DeckConfigError("appearance.accent must be 'system' or #RRGGBB")
+    colors = {
+        key: appearance_data.get(key, "system") for key in APPEARANCE_COLOR_KEYS
+    }
+    for key, value in colors.items():
+        if not valid_color(value):
+            raise DeckConfigError(
+                f"appearance.{key} must be 'system' or #RRGGBB"
+            )
     source = (path.parent / source_name).resolve()
-    return AppConfig(path, source, Appearance(theme, accent), load_decks(source))
+    return AppConfig(
+        path,
+        source,
+        Appearance(**colors),
+        load_decks(source),
+    )
+
+
+def valid_color(value: object) -> bool:
+    """Check one appearance color.
+
+    Parameters
+    ----------
+    value : object
+        Value read from configuration or setup.
+
+    Returns
+    -------
+    bool
+        ``True`` for ``system`` or a six-digit hex color.
+    """
+    return isinstance(value, str) and (
+        value == "system" or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
+    )
 
 
 def valid_accent(value: object) -> bool:
-    """Return whether *value* is ``system`` or a six-digit hex color."""
-    return isinstance(value, str) and (value == "system" or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None)
+    """Check an accent value for older integrations.
+
+    Parameters
+    ----------
+    value : object
+        Accent value to validate.
+
+    Returns
+    -------
+    bool
+        Result from :func:`valid_color`.
+    """
+    return valid_color(value)
+
+
+def appearance_toml(appearance: Appearance) -> str:
+    """Format the appearance table shown and written by setup.
+
+    Parameters
+    ----------
+    appearance : Appearance
+        Appearance values to serialize.
+
+    Returns
+    -------
+    str
+        Complete TOML ``appearance`` table with a trailing newline.
+    """
+    lines = ["[appearance]"]
+    lines.extend(
+        f'{key} = "{getattr(appearance, key)}"' for key in APPEARANCE_COLOR_KEYS
+    )
+    return "\n".join(lines) + "\n"
 
 
 def load_decks(source: Path) -> list[Deck]:

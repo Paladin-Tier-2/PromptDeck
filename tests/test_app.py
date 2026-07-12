@@ -22,8 +22,8 @@ class AppTests(unittest.TestCase):
 
     def test_custom_accent_uses_readable_selected_text(self):
         palette = QPalette()
-        dark = ThemeColors.from_palette(palette, "#112233")
-        light = ThemeColors.from_palette(palette, "#f0eedd")
+        dark = ThemeColors.from_palette(palette, Appearance(accent="#112233"))
+        light = ThemeColors.from_palette(palette, Appearance(accent="#f0eedd"))
         self.assertEqual(dark.selected_text, QColor("#ffffff"))
         self.assertEqual(light.selected_text, QColor("#000000"))
 
@@ -49,16 +49,24 @@ class AppTests(unittest.TestCase):
                 close.assert_called_once()
 
     def test_setup_dialog_returns_visible_choices(self):
-        source = Path("/tmp/existing/decks.toml")
-        dialog = SetupDialog(source, "system", True)
+        source = Path("/example/decks.toml")
+        dialog = SetupDialog(source, Appearance(), True)
         choices = dialog.choices()
         self.assertEqual(choices.source, source)
-        self.assertEqual(choices.accent, "system")
+        self.assertEqual(choices.appearance.accent, "system")
         self.assertTrue(choices.install_service)
 
-        dialog.custom_accent.setChecked(True)
-        dialog.accent = "#7c3aed"
-        self.assertEqual(dialog.choices().accent, "#7c3aed")
+        dialog.preview_color("accent", QColor("#d946ef"))
+        dialog.preview_color("card_background", QColor("#18181b"))
+        self.assertEqual(dialog.preview.theme.accent, QColor("#d946ef"))
+        self.assertEqual(dialog.preview.theme.card, QColor("#18181b"))
+        self.assertIn('accent = "#d946ef"', dialog.toml.toPlainText())
+        self.assertIn('card_background = "#18181b"', dialog.toml.toPlainText())
+        self.assertTrue(dialog.preview.selection_visible)
+
+        dialog.show_page(1)
+        self.assertFalse(dialog.back_button.isHidden())
+        self.assertTrue(dialog.next_button.isHidden())
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from promptdeck.cli import (
     parser,
     service_unit,
 )
-from promptdeck.config import config_dir
+from promptdeck.config import Appearance, config_dir
 
 
 class CliTests(unittest.TestCase):
@@ -50,10 +50,15 @@ class CliTests(unittest.TestCase):
                 patch("promptdeck.cli.print_shortcut_help"),
                 patch("builtins.print"),
             ):
-                self.assertEqual(finish_setup(None, "#7c3aed", True, False), 0)
-                self.assertEqual(finish_setup(None, "system", False, False), 0)
+                appearance = Appearance(
+                    accent="#7c3aed", card_background="#18181b"
+                )
+                self.assertEqual(finish_setup(None, appearance, True, False), 0)
+                self.assertEqual(finish_setup(None, Appearance(), False, False), 0)
                 settings = config_dir() / "config.toml"
-            self.assertIn('accent = "#7c3aed"', settings.read_text())
+            text = settings.read_text()
+            self.assertIn('accent = "#7c3aed"', text)
+            self.assertIn('card_background = "#18181b"', text)
 
     def test_unchecked_autostart_removes_an_existing_service(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,7 +77,7 @@ class CliTests(unittest.TestCase):
                 patch("promptdeck.cli.print_shortcut_help"),
                 patch("builtins.print"),
             ):
-                finish_setup(None, "system", True, False)
+                finish_setup(None, Appearance(), True, False)
             service.assert_called_once_with("uninstall")
 
 

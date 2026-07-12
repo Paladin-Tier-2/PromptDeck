@@ -1,6 +1,6 @@
 # PromptDeck
 
-PromptDeck is a small keyboard-first prompt picker. It opens over the current screen, copies a saved prompt, and gets out of the way. Its light/dark colors and default accent come from the desktop's Qt palette; an optional `#RRGGBB` accent can override only the selection color.
+PromptDeck is a small keyboard-first prompt picker. It opens over the current screen, copies a saved prompt, and gets out of the way. Its colors follow the desktop's Qt palette by default and can be changed in setup or `config.toml`.
 
 ## Install
 
@@ -11,7 +11,7 @@ pip install promptdeck-qt
 promptdeck setup
 ```
 
-Setup uses native dialogs for migration and color selection. Use `promptdeck setup --terminal` if you prefer terminal prompts, or `--yes` for unattended setup.
+Setup has separate prompt and appearance pages. The appearance page shows the real overlay and updates it while you choose colors. Use `promptdeck setup --terminal` if you prefer terminal prompts, or `--yes` for unattended setup.
 
 The isolated Linux installer keeps the application out of your project folders:
 
@@ -57,8 +57,11 @@ version = 1
 deck_source = "decks.toml"
 
 [appearance]
-theme = "system"
 accent = "system" # or "#7c3aed"
+card_background = "system"
+card_border = "system"
+selected_border = "system"
+card_text = "system"
 ```
 
 Each deck has a name and cards:

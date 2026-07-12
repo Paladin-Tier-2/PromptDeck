@@ -6,9 +6,19 @@ import signal
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
-from .config import DeckConfigError, config_dir, config_path, load_app_config, valid_accent
+from .config import (
+    APPEARANCE_COLOR_KEYS,
+    Appearance,
+    DeckConfigError,
+    appearance_toml,
+    config_dir,
+    config_path,
+    load_app_config,
+    valid_color,
+)
 
 
 SAMPLE_DECKS = '''[[decks]]
@@ -100,7 +110,20 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
-    """Run graphical setup by default, with terminal and unattended modes."""
+    """Run graphical, terminal, or unattended setup.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed PromptDeck setup options.
+    qt_args : list of str or None, optional
+        Unknown command-line values forwarded to Qt.
+
+    Returns
+    -------
+    int
+        Process exit code.
+    """
     source = args.migrate.expanduser().resolve() if args.migrate else detect_legacy()
     if args.yes:
         service_choice = (
@@ -110,7 +133,7 @@ def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
         )
         return finish_setup(
             source,
-            args.accent or "system",
+            Appearance(accent=args.accent or "system"),
             args.accent is not None,
             service_choice,
         )
@@ -121,7 +144,20 @@ def setup(args: argparse.Namespace, qt_args: list[str] | None = None) -> int:
 
 
 def terminal_setup(args: argparse.Namespace, source: Path | None) -> int:
-    """Collect migration and accent choices in the terminal."""
+    """Collect migration and accent choices in the terminal.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed PromptDeck setup options.
+    source : pathlib.Path or None
+        Existing deck file offered for migration.
+
+    Returns
+    -------
+    int
+        Process exit code from :func:`finish_setup`.
+    """
     if source:
         answer = input(f"Copy prompts from {source}? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
@@ -134,11 +170,28 @@ def terminal_setup(args: argparse.Namespace, source: Path | None) -> int:
     service_choice = (
         True if sys.platform.startswith("linux") and not args.no_service else None
     )
-    return finish_setup(source, accent, True, service_choice)
+    return finish_setup(source, Appearance(accent=accent), True, service_choice)
 
 
-def graphical_setup(args: argparse.Namespace, source: Path | None, qt_args: list[str]) -> int:
-    """Collect migration and accent choices with native Qt dialogs."""
+def graphical_setup(
+    args: argparse.Namespace, source: Path | None, qt_args: list[str]
+) -> int:
+    """Collect setup choices with the native Qt window.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed PromptDeck setup options.
+    source : pathlib.Path or None
+        Existing deck file offered for migration.
+    qt_args : list of str
+        Unknown command-line values forwarded to Qt.
+
+    Returns
+    -------
+    int
+        Process exit code from the dialog or :func:`finish_setup`.
+    """
     from PySide6.QtWidgets import QApplication, QDialog
 
     from .setup_ui import SetupDialog
@@ -148,22 +201,24 @@ def graphical_setup(args: argparse.Namespace, source: Path | None, qt_args: list
     app.setApplicationDisplayName("PromptDeck Setup")
     app.setDesktopFileName("promptdeck")
 
-    accent = args.accent or "system"
+    appearance = Appearance()
     settings = config_path(args.config)
-    if args.accent is None and settings.exists():
+    if settings.exists():
         try:
-            accent = load_app_config(settings).appearance.accent
+            appearance = load_app_config(settings).appearance
         except DeckConfigError:
             pass
+    if args.accent is not None:
+        appearance = replace(appearance, accent=args.accent)
 
     manage_service = sys.platform.startswith("linux") and not args.no_service
-    dialog = SetupDialog(source, accent, manage_service)
+    dialog = SetupDialog(source, appearance, manage_service)
     if dialog.exec() != QDialog.Accepted:
         return 1
     choices = dialog.choices()
     return finish_setup(
         choices.source,
-        choices.accent,
+        choices.appearance,
         True,
         choices.install_service if manage_service else None,
     )
@@ -171,11 +226,28 @@ def graphical_setup(args: argparse.Namespace, source: Path | None, qt_args: list
 
 def finish_setup(
     source: Path | None,
-    accent: str,
-    update_accent: bool,
+    appearance: Appearance,
+    update_appearance: bool,
     service_choice: bool | None,
 ) -> int:
-    """Write setup choices without overwriting existing prompt files."""
+    """Write setup choices without overwriting existing prompts.
+
+    Parameters
+    ----------
+    source : pathlib.Path or None
+        Existing root deck file to copy when available.
+    appearance : Appearance
+        Validated colors to write to ``config.toml``.
+    update_appearance : bool
+        Replace appearance values in an existing config when ``True``.
+    service_choice : bool or None
+        Install, remove, or leave the Linux user service unchanged.
+
+    Returns
+    -------
+    int
+        Zero on success or a nonzero validation or service error code.
+    """
     directory = config_dir()
     directory.mkdir(parents=True, exist_ok=True)
     decks = directory / "decks.toml"
@@ -185,13 +257,18 @@ def finish_setup(
     elif not decks.exists():
         decks.write_text(SAMPLE_DECKS, encoding="utf-8")
 
-    if not valid_accent(accent):
-        print("PromptDeck: accent must be 'system' or #RRGGBB", file=sys.stderr)
-        return 2
+    for key in APPEARANCE_COLOR_KEYS:
+        if not valid_color(getattr(appearance, key)):
+            print(
+                f"PromptDeck: {key} must be 'system' or #RRGGBB",
+                file=sys.stderr,
+            )
+            return 2
     settings = directory / "config.toml"
-    if not settings.exists() or update_accent:
+    if not settings.exists() or update_appearance:
         settings.write_text(
-            f'version = 1\ndeck_source = "decks.toml"\n\n[appearance]\ntheme = "system"\naccent = "{accent}"\n',
+            'version = 1\ndeck_source = "decks.toml"\n\n'
+            + appearance_toml(appearance),
             encoding="utf-8",
         )
     install_desktop_entry()

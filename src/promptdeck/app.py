@@ -25,7 +25,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .config import AppConfig, Card, Deck, load_app_config
+from .config import AppConfig, Appearance, Card, Deck, load_app_config
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -47,30 +47,47 @@ class ThemeColors:
     card: QColor
     muted: QColor
     accent: QColor
+    selected_border: QColor
     selected_text: QColor
     error: QColor
 
     @classmethod
     def from_palette(
-        cls, palette: QPalette, accent: str = "system"
+        cls, palette: QPalette, appearance: Appearance = Appearance()
     ) -> "ThemeColors":
-        """Build overlay colors from a Qt palette and optional hex accent."""
-        accent_color = palette.color(QPalette.Accent)
+        """Build overlay colors from a Qt palette and appearance settings.
+
+        Parameters
+        ----------
+        palette : QPalette
+            Desktop palette used for every ``system`` value.
+        appearance : Appearance, optional
+            User color overrides.
+
+        Returns
+        -------
+        ThemeColors
+            Resolved colors ready for painting.
+        """
+        def color(value: str, role: QPalette.ColorRole) -> QColor:
+            return palette.color(role) if value == "system" else QColor(value)
+
+        accent = color(appearance.accent, QPalette.Accent)
         selected_text = palette.color(QPalette.HighlightedText)
-        if accent != "system":
-            accent_color = QColor(accent)
+        if appearance.accent != "system":
             luminance = (
-                0.2126 * accent_color.red()
-                + 0.7152 * accent_color.green()
-                + 0.0722 * accent_color.blue()
+                0.2126 * accent.red()
+                + 0.7152 * accent.green()
+                + 0.0722 * accent.blue()
             ) / 255
             selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
         return cls(
-            palette.color(QPalette.WindowText),
-            palette.color(QPalette.Text),
-            palette.color(QPalette.Button),
-            palette.color(QPalette.Mid),
-            accent_color,
+            color(appearance.card_text, QPalette.WindowText),
+            color(appearance.card_text, QPalette.Text),
+            color(appearance.card_background, QPalette.Button),
+            color(appearance.card_border, QPalette.Mid),
+            accent,
+            color(appearance.selected_border, QPalette.Accent),
             selected_text,
             palette.color(QPalette.BrightText),
         )
@@ -111,15 +128,34 @@ def request_existing_daemon() -> bool:
 class PromptDeck(QWidget):
     """Qt widget that displays and controls the prompt deck UI."""
 
-    def __init__(self, config: AppConfig, daemon: bool = False):
-        """Create an overlay from resolved config; daemon windows hide on close."""
-        super().__init__()
+    def __init__(
+        self,
+        config: AppConfig,
+        daemon: bool = False,
+        parent: QWidget | None = None,
+        embedded: bool = False,
+    ):
+        """Create a full overlay or an embedded setup preview.
+
+        Parameters
+        ----------
+        config : AppConfig
+            Resolved decks and appearance settings.
+        daemon : bool, optional
+            Hide instead of quitting when the window closes.
+        parent : QWidget or None, optional
+            Parent widget used by the setup preview.
+        embedded : bool, optional
+            Draw inside setup instead of creating a top-level overlay.
+        """
+        super().__init__(parent)
         self.config_path = config.path
         self.decks = config.decks
         self.theme = ThemeColors.from_palette(
-            QApplication.palette(), config.appearance.accent
+            QApplication.palette(), config.appearance
         )
         self.daemon = daemon
+        self.embedded = embedded
         self.deck_index = 0
         self.card_index = 0
         self.selection_visible = False
@@ -128,17 +164,20 @@ class PromptDeck(QWidget):
         self.server_socket = None
         self.server_notifier = None
 
-        self.setWindowTitle("Prompt Deck")
-        self.setWindowFlags(
-            Qt.Tool
-            | Qt.FramelessWindowHint
-            | Qt.WindowStaysOnTopHint
-            | Qt.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.move_to_cursor_screen()
-        self.setWindowOpacity(1.0)
+        if embedded:
+            self.setFocusPolicy(Qt.NoFocus)
+        else:
+            self.setWindowTitle("Prompt Deck")
+            self.setWindowFlags(
+                Qt.Tool
+                | Qt.FramelessWindowHint
+                | Qt.WindowStaysOnTopHint
+                | Qt.NoDropShadowWindowHint
+            )
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            self.setFocusPolicy(Qt.StrongFocus)
+            self.move_to_cursor_screen()
+            self.setWindowOpacity(1.0)
 
     @property
     def deck(self) -> Deck:
@@ -175,7 +214,7 @@ class PromptDeck(QWidget):
             config = load_app_config(self.config_path)
             self.decks = config.decks
             self.theme = ThemeColors.from_palette(
-                QApplication.palette(), config.appearance.accent
+                QApplication.palette(), config.appearance
             )
             self.deck_index = 0
             self.card_index = 0
@@ -188,6 +227,17 @@ class PromptDeck(QWidget):
         self.raise_()
         self.activateWindow()
         self.selection_visible = True
+        self.update()
+
+    def set_appearance(self, appearance: Appearance) -> None:
+        """Apply appearance settings to the overlay renderer.
+
+        Parameters
+        ----------
+        appearance : Appearance
+            Values to resolve against the active desktop palette.
+        """
+        self.theme = ThemeColors.from_palette(QApplication.palette(), appearance)
         self.update()
 
     def start_server(self):
@@ -297,6 +347,11 @@ class PromptDeck(QWidget):
         event : QFocusEvent
             Qt focus event passed by the window system.
         """
+        if self.embedded:
+            self.selection_visible = True
+            self.update()
+            super().focusOutEvent(event)
+            return
         self.selection_visible = False
         self.update()
         if self.has_been_active:
@@ -380,7 +435,8 @@ class PromptDeck(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        self.draw_header(painter)
+        if not self.embedded:
+            self.draw_header(painter)
         self.draw_cards(painter)
         self.draw_status(painter)
 
@@ -468,7 +524,7 @@ class PromptDeck(QWidget):
             fill.setColorAt(0.0, self.theme.lighter(120))
             fill.setColorAt(0.52, self.theme.accent)
             fill.setColorAt(1.0, self.theme.darker(145))
-            border = self.theme.lighter(145)
+            border = self.theme.selected_border
             title_color = self.theme.selected_text
             body_color = self.theme.alpha(self.theme.selected_text, 225)
         else:
@@ -478,7 +534,7 @@ class PromptDeck(QWidget):
             body_color = self.theme.alpha(self.theme.body_text, 225)
 
         if selected:
-            painter.setPen(QPen(self.theme.alpha(self.theme.accent, 110), 8))
+            painter.setPen(QPen(self.theme.alpha(self.theme.selected_border, 110), 8))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(-4, -4, 4, 4), 15, 15)
 
