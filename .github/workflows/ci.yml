@@ -35,3 +35,28 @@ jobs:
       - run: python -m venv /tmp/promptdeck-wheel
       - run: /tmp/promptdeck-wheel/bin/pip install --find-links dist promptdeck-qt
       - run: /tmp/promptdeck-wheel/bin/promptdeck --help
+
+  installer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - if: runner.os == 'Linux'
+        run: |
+          PROMPTDECK_PACKAGE=. \
+          XDG_CONFIG_HOME="$RUNNER_TEMP/config" \
+          XDG_DATA_HOME="$RUNNER_TEMP/data" \
+          XDG_BIN_HOME="$RUNNER_TEMP/bin" \
+          ./install.sh --yes --no-service
+          "$RUNNER_TEMP/bin/promptdeck" --help
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PROMPTDECK_PACKAGE = "."
+          ./install.ps1 --yes
+          & "$env:LOCALAPPDATA\PromptDeck\bin\promptdeck.cmd" --help
