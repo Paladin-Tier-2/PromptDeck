@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "promptdeck-qt"
+version = "0.1.0"
+description = "A keyboard-first prompt picker"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Paladin-Tier-2" }]
+dependencies = [
+  "PySide6-Essentials>=6.7",
+  "tomli>=2; python_version < '3.11'",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications :: Qt",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Paladin-Tier-2/PromptDeck"
+Issues = "https://github.com/Paladin-Tier-2/PromptDeck/issues"
+
+[project.scripts]
+promptdeck = "promptdeck.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

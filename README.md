@@ -1,48 +1,73 @@
 # PromptDeck
 
-PromptDeck is a small keyboard-first prompt picker. It opens as a full-screen overlay, lets me choose a saved prompt, copies it to the clipboard, and gets out of the way.
+PromptDeck is a small keyboard-first prompt picker. It opens over the current screen, copies a saved prompt, and gets out of the way. Its colors follow the desktop's Qt palette by default and can be changed in setup or `config.toml`.
 
-I built it because I wanted my recurring prompts available from one global shortcut without searching through notes or keeping another application open.
+## Install
 
-The interface is built with Qt. On Linux it uses `wl-copy` for the Wayland clipboard and `notify-send` for the confirmation message. On Windows it uses the Qt clipboard directly.
-
-## Setup
-
-### Linux
+PromptDeck requires Python 3.10 or newer.
 
 ```bash
-git clone https://github.com/Paladin-Tier-2/PromptDeck.git ~/PromptDeck
-cd ~/PromptDeck
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp examples/decks.toml decks.toml
-python prompt_deck.py
+pip install promptdeck-qt
+promptdeck setup
 ```
 
-On Fedora, install the two small desktop dependencies:
+Setup has separate prompt and appearance pages. The appearance page shows the real overlay and updates it while you choose colors. Use `promptdeck setup --terminal` if you prefer terminal prompts, or `--yes` for unattended setup.
+
+The isolated Linux installer keeps the application out of your project folders:
 
 ```bash
-sudo dnf install wl-clipboard libnotify
+curl -fsSL https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.sh | sh
 ```
 
-### Windows
+On Windows, download and run the installer:
 
 ```powershell
-git clone --branch windows-support https://github.com/Paladin-Tier-2/PromptDeck.git
-cd PromptDeck
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item examples\decks.toml decks.toml
-python prompt_deck.py
+Invoke-WebRequest https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Your `decks.toml` file is ignored by Git. Prompt text often becomes personal, so the repository includes only a generic example.
+Re-running either installer upgrades the package without overwriting your configuration or prompts. Windows autostart is intentionally not installed in v0.1.
 
-## Deck format
+## Use
 
-Each deck has a name and a list of cards. Each card has a title, an optional letter shortcut, and the text to copy.
+```bash
+promptdeck
+promptdeck daemon
+promptdeck service start
+promptdeck service stop
+promptdeck service restart
+promptdeck service status
+```
+
+On Linux, `promptdeck setup` installs and starts `promptdeck.service`, a systemd **user** service. Plain `promptdeck` asks that warm daemon to show the overlay. If the daemon is stopped, it opens a one-shot process instead.
+
+Controls: `Tab` changes deck; arrows or `H/J/K/L` move; `1`-`9` and `0` select directly; `Enter` or `Space` copies; `Esc` or `Backspace` closes.
+
+## Configuration
+
+Setup stores private files outside the repository:
+
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/promptdeck`
+- Windows: `%APPDATA%\PromptDeck`
+
+`config.toml`:
+
+```toml
+version = 1
+deck_source = "decks.toml"
+
+[appearance]
+selected_background = "system" # or "#7c3aed"
+selected_border = "system"
+card_background = "system"
+card_border = "system"
+card_text = "system"
+```
+
+Selected-card text is automatic: black on light selected backgrounds and white on
+dark selected backgrounds.
+
+Each deck has a name and cards:
 
 ```toml
 [[decks]]
@@ -54,39 +79,24 @@ key = "C"
 body = "Make this shorter without changing its meaning."
 ```
 
-Larger collections can be split across files with recursive includes:
+Split larger collections with `include = ["decks/*.toml"]`. PromptDeck reloads the config, included decks, and colors whenever the overlay opens.
 
-```toml
-include = ["decks/*.toml"]
-```
+Config precedence is `--config`, then `PROMPTDECK_CONFIG`, then the native default. `--config` may point to either `config.toml` or a deck file.
 
-Patterns are resolved relative to the file that contains them. Files are loaded in sorted order, and already visited files are skipped to prevent include cycles.
-
-## Controls
-
-- `Tab`: next deck
-- `Shift+Tab`: previous deck
-- `1`-`9`, `0`: choose a card directly
-- Arrow keys or `H/J/K/L`: move the selection
-- `Enter` or `Space`: copy and close
-- `Esc` or `Backspace`: close without copying
-
-## Daemon mode
-
-Running the app as a daemon keeps Qt warm, so a desktop shortcut can open it without the normal startup delay:
+Setup safely detects the old `~/PromptDeck/decks.toml` and `~/.config/prompt-deck/decks.toml` locations. Migration copies the root file and sibling `decks/` directory; it never moves, deletes, or overwrites files. For unattended setup:
 
 ```bash
-python prompt_deck.py --daemon
+promptdeck setup --yes --accent system
+promptdeck setup --yes --migrate /path/to/decks.toml
+promptdeck setup --yes --no-service
 ```
 
-Show the running daemon with:
+## Development
 
 ```bash
-python prompt_deck.py --show
+python -m pip install -e .
+python -m unittest discover -s tests -v
+python -m build
 ```
 
-If no daemon is running, the same command starts PromptDeck normally.
-
-## Platform support
-
-The `main` branch is the Linux/Wayland version I use. This branch adds Windows support, but it still needs testing on a real Windows machine.
+The GitHub Actions test matrix covers Linux and Windows and verifies a clean wheel install.

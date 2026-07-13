@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
+"""Qt overlay, palette handling, clipboard access, and daemon socket."""
+
 import math
 import os
-import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -9,7 +10,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-import tomllib
 from PySide6.QtCore import QEvent, QRectF, QSocketNotifier, Qt
 from PySide6.QtGui import (
     QBrush,
@@ -20,34 +20,89 @@ from PySide6.QtGui import (
     QGuiApplication,
     QLinearGradient,
     QPainter,
+    QPalette,
     QPen,
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .config import AppConfig, Appearance, Card, Deck, load_app_config
+
 IS_WINDOWS = sys.platform == "win32"
-SOURCE = Path(__file__).resolve().parent / "decks.toml"
-LEGACY_SOURCE = Path.home() / ".config" / "prompt-deck" / "decks.toml"
-if IS_WINDOWS:
-    RUNTIME_DIR = Path(tempfile.gettempdir())
-else:
-    RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-SOCKET = RUNTIME_DIR / "prompt-deck.sock"
 
 
-def deck_source() -> Path:
-    """Return the TOML file used as the deck source.
+def socket_path() -> Path:
+    """Return the per-user daemon socket path."""
+    if IS_WINDOWS:
+        return Path(tempfile.gettempdir()) / "promptdeck.sock"
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    return runtime / "promptdeck.sock"
 
-    Returns
-    -------
-    Path
-        ``SOURCE`` when it exists, otherwise ``LEGACY_SOURCE`` when it
-        exists, otherwise ``SOURCE`` as the default path.
-    """
-    if SOURCE.exists():
-        return SOURCE
-    if LEGACY_SOURCE.exists():
-        return LEGACY_SOURCE
-    return SOURCE
+
+@dataclass(frozen=True)
+class ThemeColors:
+    """Colors derived from the active Qt palette and accent setting."""
+
+    text: QColor
+    body_text: QColor
+    card: QColor
+    muted: QColor
+    accent: QColor
+    selected_border: QColor
+    selected_text: QColor
+    error: QColor
+
+    @classmethod
+    def from_palette(
+        cls, palette: QPalette, appearance: Appearance = Appearance()
+    ) -> "ThemeColors":
+        """Build overlay colors from a Qt palette and appearance settings.
+
+        Parameters
+        ----------
+        palette : QPalette
+            Desktop palette used for every ``system`` value.
+        appearance : Appearance, optional
+            User color overrides.
+
+        Returns
+        -------
+        ThemeColors
+            Resolved colors ready for painting.
+        """
+        def color(value: str, role: QPalette.ColorRole) -> QColor:
+            return palette.color(role) if value == "system" else QColor(value)
+
+        accent = color(appearance.selected_background, QPalette.Accent)
+        luminance = (
+            0.2126 * accent.red()
+            + 0.7152 * accent.green()
+            + 0.0722 * accent.blue()
+        ) / 255
+        selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
+        return cls(
+            color(appearance.card_text, QPalette.WindowText),
+            color(appearance.card_text, QPalette.Text),
+            color(appearance.card_background, QPalette.Button),
+            color(appearance.card_border, QPalette.Mid),
+            accent,
+            color(appearance.selected_border, QPalette.Accent),
+            selected_text,
+            palette.color(QPalette.BrightText),
+        )
+
+    def alpha(self, color: QColor, opacity: int) -> QColor:
+        """Return a copy of *color* with the requested opacity."""
+        result = QColor(color)
+        result.setAlpha(opacity)
+        return result
+
+    def lighter(self, factor: int) -> QColor:
+        """Return a lighter accent color."""
+        return self.accent.lighter(factor)
+
+    def darker(self, factor: int) -> QColor:
+        """Return a darker accent color."""
+        return self.accent.darker(factor)
 
 
 def request_existing_daemon() -> bool:
@@ -61,151 +116,66 @@ def request_existing_daemon() -> bool:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(0.08)
-            client.connect(str(SOCKET))
+            client.connect(str(socket_path()))
             client.sendall(b"show\n")
         return True
     except OSError:
         return False
 
 
-@dataclass
-class Card:
-    """A single prompt card.
-
-    Attributes
-    ----------
-    title : str
-        Card title shown in the grid.
-    body : str
-        Prompt text copied to the clipboard.
-    key : str
-        Optional single-key shortcut for selecting the card.
-    """
-
-    title: str
-    body: str
-    key: str = ""
-
-
-@dataclass
-class Deck:
-    """A named group of prompt cards.
-
-    Attributes
-    ----------
-    name : str
-        Deck name.
-    cards : list[Card]
-        Cards displayed when this deck is active.
-    """
-
-    name: str
-    cards: list[Card]
-
-
-def load_decks() -> list[Deck]:
-    """Load all prompt decks from the configured TOML source.
-
-    The loader starts at the path returned by ``deck_source()`` and follows
-    any TOML ``include`` patterns recursively. Each TOML deck dictionary is
-    converted into a ``Deck`` object, and each TOML card dictionary is
-    converted into a ``Card`` object.
-
-    Returns
-    -------
-    list[Deck]
-        A flat list of all loaded decks from the main TOML file and any
-        recursively included TOML files.
-    """
-    import glob
-
-    def load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
-        """Load decks from one TOML file and its recursive includes.
-
-        Parameters
-        ----------
-        path : Path
-            Filesystem path to the TOML file currently being loaded.
-        visited : set[Path]
-            TOML file paths that have already been loaded.
-
-        Returns
-        -------
-        list[Deck]
-            Deck objects parsed from ``path`` and files matched by its
-            ``include`` patterns.
-        """
-        path = path.resolve()
-        if path in visited or not path.exists():
-            return []
-        visited.add(path)
-        with path.open("rb") as source:
-            data = tomllib.load(source)
-            decks: list[Deck] = []
-            for deck_data in data.get("decks", []):
-                cards: list[Card] = []
-                for card_data in deck_data.get("cards", []):
-                    raw_body = card_data.get("body", "")
-                    clean_body = raw_body.strip() + "\n"
-                    card_obj = Card(
-                        title=card_data.get("title"),
-                        key=card_data.get("key", ""),
-                        body=clean_body,
-                    )
-                    cards.append(card_obj)
-
-                deck_obj = Deck(name=deck_data.get("name"), cards=cards)
-                decks.append(deck_obj)
-
-            for include in data.get("include", []):
-                include_path = path.parent / include
-                paths = glob.glob(str(include_path))
-                paths = sorted(paths)
-                for match in paths:
-                    match_path = Path(match)
-                    include_decks = load_recursive(match_path, visited=visited)
-                    decks.extend(include_decks)
-
-        return decks
-    visited: set[Path] = set()
-    decks = load_recursive(deck_source(), visited=visited)
-    return decks
-
-
 class PromptDeck(QWidget):
     """Qt widget that displays and controls the prompt deck UI."""
 
-    def __init__(self, decks: list[Deck], daemon: bool = False):
-        """Create the prompt deck window.
+    def __init__(
+        self,
+        config: AppConfig,
+        daemon: bool = False,
+        parent: QWidget | None = None,
+        embedded: bool = False,
+    ):
+        """Create a full overlay or an embedded setup preview.
 
         Parameters
         ----------
-        decks : list[Deck]
-            Decks available in the UI.
-        daemon : bool
-            When ``True``, closing the window hides it instead of quitting.
+        config : AppConfig
+            Resolved decks and appearance settings.
+        daemon : bool, optional
+            Hide instead of quitting when the window closes.
+        parent : QWidget or None, optional
+            Parent widget used by the setup preview.
+        embedded : bool, optional
+            Draw inside setup instead of creating a top-level overlay.
         """
-        super().__init__()
-        self.decks = decks
+        super().__init__(parent)
+        self.config_path = config.path
+        self.decks = config.decks
+        self.theme = ThemeColors.from_palette(
+            QApplication.palette(), config.appearance
+        )
         self.daemon = daemon
+        self.embedded = embedded
         self.deck_index = 0
         self.card_index = 0
         self.selection_visible = False
+        self.has_been_active = False
         self.status = ""
         self.server_socket = None
         self.server_notifier = None
 
-        self.setWindowTitle("Prompt Deck")
-        self.setWindowFlags(
-            Qt.Tool
-            | Qt.FramelessWindowHint
-            | Qt.WindowStaysOnTopHint
-            | Qt.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.move_to_cursor_screen()
-        self.setWindowOpacity(1.0)
+        if embedded:
+            self.setFocusPolicy(Qt.NoFocus)
+        else:
+            self.setWindowTitle("Prompt Deck")
+            self.setWindowFlags(
+                Qt.Tool
+                | Qt.FramelessWindowHint
+                | Qt.WindowStaysOnTopHint
+                | Qt.NoDropShadowWindowHint
+            )
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            self.setFocusPolicy(Qt.StrongFocus)
+            self.move_to_cursor_screen()
+            self.setWindowOpacity(1.0)
 
     @property
     def deck(self) -> Deck:
@@ -239,12 +209,17 @@ class PromptDeck(QWidget):
     def show_deck(self):
         """Reload decks, show the window, and focus it for selection."""
         try:
-            self.decks = load_decks()
+            config = load_app_config(self.config_path)
+            self.decks = config.decks
+            self.theme = ThemeColors.from_palette(
+                QApplication.palette(), config.appearance
+            )
             self.deck_index = 0
             self.card_index = 0
             self.status = ""
         except Exception as exc:
             self.status = f"Load failed: {exc}"
+        self.has_been_active = False
         self.move_to_cursor_screen()
         self.show()
         self.raise_()
@@ -252,17 +227,29 @@ class PromptDeck(QWidget):
         self.selection_visible = True
         self.update()
 
+    def set_appearance(self, appearance: Appearance) -> None:
+        """Apply appearance settings to the overlay renderer.
+
+        Parameters
+        ----------
+        appearance : Appearance
+            Values to resolve against the active desktop palette.
+        """
+        self.theme = ThemeColors.from_palette(QApplication.palette(), appearance)
+        self.update()
+
     def start_server(self):
         """Start the local socket server used by daemon mode."""
-        SOCKET.parent.mkdir(parents=True, exist_ok=True)
-        if SOCKET.exists():
-            SOCKET.unlink()
+        path = socket_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            path.unlink()
 
         self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server_socket.setblocking(False)
-        self.server_socket.bind(str(SOCKET))
+        self.server_socket.bind(str(path))
         if not IS_WINDOWS:
-            os.chmod(SOCKET, 0o600)
+            os.chmod(path, 0o600)
         self.server_socket.listen(8)
 
         self.server_notifier = QSocketNotifier(
@@ -351,16 +338,22 @@ class PromptDeck(QWidget):
         super().changeEvent(event)
 
     def focusOutEvent(self, event):
-        """Hide selection and close the window when focus is lost.
+        """Close after real focus loss, not a denied startup activation.
 
         Parameters
         ----------
         event : QFocusEvent
             Qt focus event passed by the window system.
         """
+        if self.embedded:
+            self.selection_visible = True
+            self.update()
+            super().focusOutEvent(event)
+            return
         self.selection_visible = False
         self.update()
-        self.close()
+        if self.has_been_active:
+            self.close()
         super().focusOutEvent(event)
 
     def focusInEvent(self, event):
@@ -371,6 +364,7 @@ class PromptDeck(QWidget):
         event : QFocusEvent
             Qt focus event passed by the window system.
         """
+        self.has_been_active = True
         self.selection_visible = True
         self.update()
         super().focusInEvent(event)
@@ -406,17 +400,9 @@ class PromptDeck(QWidget):
         """Copy the selected card body to the system clipboard."""
         text = self.card.body
         try:
-            if IS_WINDOWS:
-                QApplication.clipboard().setText(text)
-                self.close()
-                return
-
-            subprocess.run(["wl-copy"], input=text, text=True, check=True)
-            subprocess.Popen(
-                ["notify-send", "Prompt Deck", f"Copied: {self.card.title}"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            QApplication.clipboard().setText(text)
+            if not self.daemon and not IS_WINDOWS and shutil.which("wl-copy"):
+                subprocess.run(["wl-copy"], input=text, text=True, check=True)
             self.close()
         except Exception as exc:
             self.status = f"Copy failed: {exc}"
@@ -447,7 +433,26 @@ class PromptDeck(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        if not self.embedded:
+            self.draw_header(painter)
         self.draw_cards(painter)
+        self.draw_status(painter)
+
+    def draw_header(self, painter: QPainter):
+        """Draw the active deck name and position."""
+        painter.setPen(self.theme.alpha(self.theme.text, 210))
+        painter.setFont(QFont("Inter", 13, QFont.DemiBold))
+        label = f"{self.deck.name}  ·  {self.deck_index + 1}/{len(self.decks)}"
+        painter.drawText(QRectF(0, 12, self.width(), 28), Qt.AlignCenter, label)
+
+    def draw_status(self, painter: QPainter):
+        """Draw an error reported by loading or clipboard integration."""
+        if not self.status:
+            return
+        painter.setPen(self.theme.error)
+        painter.setFont(QFont("Inter", 12, QFont.DemiBold))
+        rect = QRectF(30, self.height() - 38, self.width() - 60, 24)
+        painter.drawText(rect, Qt.AlignCenter, self.status)
 
     def draw_cards(self, painter: QPainter):
         """Draw all cards for the active deck.
@@ -514,20 +519,20 @@ class PromptDeck(QWidget):
 
         if selected:
             fill = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            fill.setColorAt(0.0, QColor("#3daee9"))
-            fill.setColorAt(0.52, QColor("#2f8fbd"))
-            fill.setColorAt(1.0, QColor("#1f5f82"))
-            border = QColor("#9ad9ff")
-            title_color = QColor("#06111a")
-            body_color = QColor("#071722")
+            fill.setColorAt(0.0, self.theme.lighter(120))
+            fill.setColorAt(0.52, self.theme.accent)
+            fill.setColorAt(1.0, self.theme.darker(145))
+            border = self.theme.selected_border
+            title_color = self.theme.selected_text
+            body_color = self.theme.alpha(self.theme.selected_text, 225)
         else:
-            fill = QColor(0, 0, 0, 224)
-            border = QColor(92, 110, 130, 205)
-            title_color = QColor("#ffffff")
-            body_color = QColor(235, 242, 250, 225)
+            fill = self.theme.alpha(self.theme.card, 224)
+            border = self.theme.alpha(self.theme.muted, 205)
+            title_color = self.theme.text
+            body_color = self.theme.alpha(self.theme.body_text, 225)
 
         if selected:
-            painter.setPen(QPen(QColor(61, 174, 233, 110), 8))
+            painter.setPen(QPen(self.theme.alpha(self.theme.selected_border, 110), 8))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(-4, -4, 4, 4), 15, 15)
 
@@ -540,9 +545,9 @@ class PromptDeck(QWidget):
             rect.right() - 46 * scale, rect.top() + 16 * scale, 30 * scale, 26 * scale
         )
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#0f172a" if selected else "#334155"))
+        painter.setBrush(self.theme.darker(170) if selected else self.theme.muted)
         painter.drawRoundedRect(badge, 7 * scale, 7 * scale)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(self.theme.selected_text if selected else self.theme.text)
         painter.setFont(QFont("Inter", max(9, int(12 * scale)), QFont.Bold))
         painter.drawText(badge, Qt.AlignCenter, badge_text)
 
@@ -637,36 +642,3 @@ class PromptDeck(QWidget):
                     return lines
 
         return lines
-
-
-def main():
-    """Run the Prompt Deck application.
-
-    Returns
-    -------
-    int
-        Qt application exit code, or ``0`` when an existing daemon handled
-        the request.
-    """
-    daemon = "--daemon" in sys.argv
-    if not daemon and "--show" not in sys.argv and request_existing_daemon():
-        return 0
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("prompt-deck")
-    app.setApplicationDisplayName("Prompt Deck")
-    app.setDesktopFileName("net.local.prompt-deck")
-    app.setQuitOnLastWindowClosed(not daemon)
-
-    widget = PromptDeck(load_decks(), daemon=daemon)
-    if daemon:
-        widget.start_server()
-        if "--show" in sys.argv:
-            widget.show_deck()
-    else:
-        widget.show_deck()
-    return app.exec()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

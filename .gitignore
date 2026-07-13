@@ -1,6 +1,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+build/
+dist/
+*.egg-info/
 
 # Local prompt collections. These can contain personal information.
 /decks.toml
