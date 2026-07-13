@@ -83,7 +83,7 @@ Split larger collections with `include = ["decks/*.toml"]`. PromptDeck reloads t
 
 Config precedence is `--config`, then `PROMPTDECK_CONFIG`, then the native default. `--config` may point to either `config.toml` or a deck file.
 
-Setup safely detects the old `~/PromptDeck/decks.toml` and `~/.config/prompt-deck/decks.toml` locations. Migration copies the root file and sibling `decks/` directory; it never moves, deletes, or overwrites files. For unattended setup:
+Existing PromptDeck installations are detected automatically. Migration copies prompt files into the native config directory; it never moves, deletes, or overwrites the originals. For unattended setup:
 
 ```bash
 promptdeck setup --yes --accent system
