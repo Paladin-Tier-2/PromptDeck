@@ -41,7 +41,7 @@ promptdeck service status
 
 On Linux, `promptdeck setup` installs and starts `promptdeck.service`, a systemd **user** service. Plain `promptdeck` asks that warm daemon to show the overlay. If the daemon is stopped, it opens a one-shot process instead.
 
-Controls: `Tab` changes deck; arrows or `H/J/K/L` move; `1`-`9` and `0` select directly; `Enter` or `Space` copies; `Esc` or `Backspace` closes.
+See [keyboard controls](KEYBINDINGS.md) for card navigation and the deck finder.
 
 ## Configuration
 

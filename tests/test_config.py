@@ -44,6 +44,33 @@ class ConfigTests(unittest.TestCase):
             (root / "parts" / "a.toml").write_text('include = ["../decks.toml"]\n' + DECK, encoding="utf-8")
             self.assertEqual(len(load_decks(root / "decks.toml")), 1)
 
+    def test_globbed_decks_keep_filename_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parts = root / "parts"
+            parts.mkdir()
+            (root / "decks.toml").write_text(
+                'include = ["parts/*.toml"]\n', encoding="utf-8"
+            )
+
+            def deck(name):
+                return (
+                    f'[[decks]]\nname = "{name}"\n[[decks.cards]]\n'
+                    'title = "Test"\nbody = "Test"\n'
+                )
+
+            files = {
+                "20-microscopy.toml": "Microscopy",
+                "00-ai.toml": "AI",
+                "10-solid-state.toml": "Solid State",
+                "personal.toml": "Personal",
+            }
+            for filename, name in files.items():
+                (parts / filename).write_text(deck(name), encoding="utf-8")
+
+            names = [deck.name for deck in load_decks(root / "decks.toml")]
+            self.assertEqual(names, ["AI", "Solid State", "Microscopy", "Personal"])
+
     def test_rejects_invalid_accent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
