@@ -339,27 +339,36 @@ class PromptDeck(QWidget):
         super().keyPressEvent(event)
 
     @property
+    def matching_deck_indices(self) -> list[int]:
+        """Return alphabetical deck indices matching the query prefix.
+
+        Returns
+        -------
+        list[int]
+            Matching deck indices sorted by name and configured order.
+        """
+        query = self.deck_query.strip().casefold()
+        return sorted(
+            (
+                index
+                for index, deck in enumerate(self.decks)
+                if not query or deck.name.casefold().startswith(query)
+            ),
+            key=lambda index: (self.decks[index].name.casefold(), index),
+        )
+
+    @property
     def matching_deck_index(self) -> int | None:
-        """Return the first alphabetical deck matching the query prefix.
+        """Return the first matching deck for a non-empty query.
 
         Returns
         -------
         int or None
             Matching deck index, or ``None`` for an empty or unmatched query.
         """
-        query = self.deck_query.strip().casefold()
-        if not query:
+        if not self.deck_query.strip():
             return None
-        matches = [
-            index
-            for index, deck in enumerate(self.decks)
-            if deck.name.casefold().startswith(query)
-        ]
-        return min(
-            matches,
-            key=lambda index: (self.decks[index].name.casefold(), index),
-            default=None,
-        )
+        return next(iter(self.matching_deck_indices), None)
 
     def open_deck_finder(self) -> None:
         """Open search and remember the exact card shown before previewing."""
@@ -590,6 +599,53 @@ class PromptDeck(QWidget):
         )
         search_text = self.deck_query if self.deck_query else "Find a deck..."
         painter.drawText(search.adjusted(16, 0, -16, 0), Qt.AlignVCenter, search_text)
+
+        matches = self.matching_deck_indices
+        if not matches:
+            return
+        row_height = 40.0
+        max_rows = max(1, min(8, int((self.height() - 64) / row_height)))
+        matches = matches[:max_rows]
+        panel = QRectF(
+            search.left(),
+            search.bottom() + 6,
+            search.width(),
+            len(matches) * row_height + 8,
+        )
+        painter.setPen(QPen(self.theme.alpha(self.theme.muted, 190), 1))
+        painter.setBrush(self.theme.alpha(self.theme.card, 250))
+        painter.drawRoundedRect(panel, 10, 10)
+
+        selected = self.matching_deck_index
+        if selected is None:
+            selected = self.deck_index
+        for position, deck_index in enumerate(matches):
+            row = QRectF(
+                panel.left() + 4,
+                panel.top() + 4 + position * row_height,
+                panel.width() - 8,
+                row_height,
+            )
+            if deck_index == selected:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(self.theme.accent)
+                painter.drawRoundedRect(row, 7, 7)
+                text_color = self.theme.selected_text
+            else:
+                text_color = self.theme.text
+
+            deck = self.decks[deck_index]
+            painter.setPen(text_color)
+            painter.setFont(QFont("Inter", 12, QFont.DemiBold))
+            painter.drawText(row.adjusted(12, 0, -110, 0), Qt.AlignVCenter, deck.name)
+            count = len(deck.cards)
+            label = f"{count} card" + ("" if count == 1 else "s")
+            painter.setFont(QFont("Inter", 10, QFont.DemiBold))
+            painter.drawText(
+                row.adjusted(0, 0, -12, 0),
+                Qt.AlignVCenter | Qt.AlignRight,
+                label,
+            )
 
     def draw_cards(self, painter: QPainter):
         """Draw all cards for the active deck.

@@ -80,9 +80,19 @@ class AppTests(unittest.TestCase):
         self.assertEqual(widget.card_index, 1)
 
         self.press(widget, Qt.Key_Slash, "/")
+        suggestions = [
+            widget.decks[index].name for index in widget.matching_deck_indices
+        ]
+        self.assertEqual(
+            suggestions, ["AI", "Microscopy", "Solid Advice", "Solid State"]
+        )
         self.type_text(widget, "solid")
         self.assertTrue(widget.deck_finder_open)
         self.assertEqual(widget.deck_query, "solid")
+        suggestions = [
+            widget.decks[index].name for index in widget.matching_deck_indices
+        ]
+        self.assertEqual(suggestions, ["Solid Advice", "Solid State"])
         self.assertEqual(widget.deck.name, "Solid Advice")
         self.assertEqual(widget.card_index, 0)
 
