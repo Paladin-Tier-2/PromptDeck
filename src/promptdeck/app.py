@@ -10,14 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import (
-    QEasingCurve,
-    QEvent,
-    QRectF,
-    QSocketNotifier,
-    Qt,
-    QVariantAnimation,
-)
+from PySide6.QtCore import QEvent, QRectF, QSocketNotifier, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -165,17 +158,8 @@ class PromptDeck(QWidget):
         self.card_index = 0
         self.deck_finder_open = False
         self.deck_query = ""
-        self.deck_result_index = 0
-        self.deck_finder_progress = 0.0
-        self.deck_finder_animation = QVariantAnimation(self)
-        self.deck_finder_animation.setDuration(120)
-        self.deck_finder_animation.setEasingCurve(QEasingCurve.OutCubic)
-        self.deck_finder_animation.valueChanged.connect(
-            self.set_deck_finder_progress
-        )
-        self.deck_finder_animation.finished.connect(
-            self.finish_deck_finder_animation
-        )
+        self.deck_origin_index = 0
+        self.deck_origin_card_index = 0
         self.selection_visible = False
         self.has_been_active = False
         self.status = ""
@@ -241,9 +225,8 @@ class PromptDeck(QWidget):
             self.status = f"Load failed: {exc}"
         self.deck_finder_open = False
         self.deck_query = ""
-        self.deck_result_index = 0
-        self.deck_finder_animation.stop()
-        self.deck_finder_progress = 0.0
+        self.deck_origin_index = 0
+        self.deck_origin_card_index = 0
         self.has_been_active = False
         self.move_to_cursor_screen()
         self.show()
@@ -356,79 +339,61 @@ class PromptDeck(QWidget):
         super().keyPressEvent(event)
 
     @property
-    def matching_deck_indices(self) -> list[int]:
-        """Return deck indices matching the current finder query.
+    def matching_deck_index(self) -> int | None:
+        """Return the first alphabetical deck matching the query prefix.
 
         Returns
         -------
-        list[int]
-            Matching deck indices in configured order.
+        int or None
+            Matching deck index, or ``None`` for an empty or unmatched query.
         """
         query = self.deck_query.strip().casefold()
         if not query:
-            return list(range(len(self.decks)))
-        return [
+            return None
+        matches = [
             index
             for index, deck in enumerate(self.decks)
-            if query in deck.name.casefold()
+            if deck.name.casefold().startswith(query)
         ]
+        return min(
+            matches,
+            key=lambda index: (self.decks[index].name.casefold(), index),
+            default=None,
+        )
 
     def open_deck_finder(self) -> None:
-        """Open the finder with the current deck highlighted."""
+        """Open search and remember the exact card shown before previewing."""
         self.deck_finder_open = True
         self.deck_query = ""
-        self.deck_result_index = self.deck_index
-        self.animate_deck_finder(1.0)
-
-    def close_deck_finder(self) -> None:
-        """Close the finder without changing the current card."""
-        self.deck_finder_open = False
-        self.animate_deck_finder(0.0)
-
-    def animate_deck_finder(self, end: float) -> None:
-        """Animate between the card view and finder.
-
-        Parameters
-        ----------
-        end : float
-            Target progress, where zero is cards and one is the finder.
-        """
-        self.deck_finder_animation.stop()
-        self.deck_finder_animation.setStartValue(self.deck_finder_progress)
-        self.deck_finder_animation.setEndValue(end)
-        self.deck_finder_animation.start()
-
-    def set_deck_finder_progress(self, value: float) -> None:
-        """Apply an animation value and repaint the overlay.
-
-        Parameters
-        ----------
-        value : float
-            Current animation progress from zero to one.
-        """
-        self.deck_finder_progress = float(value)
+        self.deck_origin_index = self.deck_index
+        self.deck_origin_card_index = self.card_index
         self.update()
 
-    def finish_deck_finder_animation(self) -> None:
-        """Clear finder text after its closing frame has disappeared."""
-        if not self.deck_finder_open:
-            self.deck_query = ""
-            self.deck_result_index = 0
-            self.deck_finder_progress = 0.0
-            self.update()
-
-    def move_deck_result(self, delta: int) -> None:
-        """Move the finder selection by a signed offset.
+    def close_deck_finder(self, restore: bool = False) -> None:
+        """Close search, optionally restoring its original card.
 
         Parameters
         ----------
-        delta : int
-            Positive values move forward and negative values move backward.
+        restore : bool, optional
+            Restore the deck and card visible when search opened.
         """
-        matches = self.matching_deck_indices
-        if matches:
-            self.deck_result_index = (self.deck_result_index + delta) % len(matches)
-            self.update()
+        if restore:
+            self.deck_index = self.deck_origin_index
+            self.card_index = self.deck_origin_card_index
+        self.deck_finder_open = False
+        self.deck_query = ""
+        self.update()
+
+    def preview_deck_query(self) -> None:
+        """Preview the first match or restore the original card."""
+        match = self.matching_deck_index
+        if match is None:
+            self.deck_index = self.deck_origin_index
+            self.card_index = self.deck_origin_card_index
+        else:
+            self.deck_index = match
+            self.card_index = 0
+        self.update()
 
     def handle_deck_finder_key(self, event) -> None:
         """Handle one key while the deck finder is active.
@@ -440,41 +405,25 @@ class PromptDeck(QWidget):
         """
         key = event.key()
         if key == Qt.Key_Escape:
-            self.close_deck_finder()
+            self.close_deck_finder(restore=True)
             return
         if key == Qt.Key_Backspace:
             if not self.deck_query:
-                self.close_deck_finder()
+                self.close_deck_finder(restore=True)
                 return
             self.deck_query = self.deck_query[:-1]
-            self.deck_result_index = 0
-            self.update()
+            self.preview_deck_query()
             return
         if key in (Qt.Key_Return, Qt.Key_Enter):
-            matches = self.matching_deck_indices
-            if matches:
-                self.deck_index = matches[self.deck_result_index]
-                self.card_index = 0
-                self.status = ""
+            if not self.deck_query or self.matching_deck_index is not None:
                 self.close_deck_finder()
-            return
-        if key == Qt.Key_Tab:
-            direction = -1 if event.modifiers() & Qt.ShiftModifier else 1
-            self.move_deck_result(direction)
-            return
-        if key in (Qt.Key_Left, Qt.Key_Up):
-            self.move_deck_result(-1)
-            return
-        if key in (Qt.Key_Right, Qt.Key_Down):
-            self.move_deck_result(1)
             return
 
         blocked = Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier
         text = event.text()
         if text and text.isprintable() and not event.modifiers() & blocked:
             self.deck_query += text
-            self.deck_result_index = 0
-            self.update()
+            self.preview_deck_query()
 
     def changeEvent(self, event):
         """Update selection visibility when window activation changes.
@@ -585,17 +534,12 @@ class PromptDeck(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        card_opacity = max(0.0, 1.0 - self.deck_finder_progress)
-        if card_opacity:
-            painter.save()
-            painter.setOpacity(card_opacity)
-            if not self.embedded:
-                self.draw_header(painter)
-            self.draw_cards(painter)
-            self.draw_status(painter)
-            painter.restore()
-        if self.deck_finder_progress:
-            self.draw_deck_finder(painter, self.deck_finder_progress)
+        if not self.embedded:
+            self.draw_header(painter)
+        self.draw_cards(painter)
+        self.draw_status(painter)
+        if self.deck_finder_open:
+            self.draw_deck_search(painter)
 
     def draw_header(self, painter: QPainter):
         """Draw the active deck name and position."""
@@ -603,7 +547,7 @@ class PromptDeck(QWidget):
         painter.setFont(font)
         label = f"{self.deck.name}  ·  {self.deck_index + 1}/{len(self.decks)}"
         width = QFontMetrics(font).horizontalAdvance(label) + 28
-        pill = QRectF((self.width() - width) / 2, 8, width, 34)
+        pill = QRectF(18, 8, width, 34)
         painter.setPen(QPen(self.theme.alpha(self.theme.muted, 190), 1))
         painter.setBrush(self.theme.alpha(self.theme.card, 240))
         painter.drawRoundedRect(pill, 10, 10)
@@ -619,121 +563,33 @@ class PromptDeck(QWidget):
         rect = QRectF(30, self.height() - 38, self.width() - 60, 24)
         painter.drawText(rect, Qt.AlignCenter, self.status)
 
-    def draw_deck_finder(self, painter: QPainter, progress: float) -> None:
-        """Draw the temporary centered deck finder.
+    def draw_deck_search(self, painter: QPainter) -> None:
+        """Draw the active deck search field at the top center.
 
         Parameters
         ----------
         painter : QPainter
             Painter used to draw on the overlay.
-        progress : float
-            Finder transition progress from zero to one.
         """
-        painter.save()
-        backdrop = QColor(self.theme.card).darker(180)
-        backdrop.setAlpha(int(245 * progress))
-        painter.fillRect(self.rect(), backdrop)
-        painter.setOpacity(progress)
-
-        matches = self.matching_deck_indices
-        row_height = 54.0
-        max_rows = max(1, min(7, int((self.height() - 160) / row_height)))
-        visible_count = min(max_rows, len(matches))
-        displayed_rows = max(1, visible_count)
-        panel_width = max(280.0, min(680.0, self.width() - 48.0))
-        panel_height = 78.0 + displayed_rows * row_height + 14.0
-        top = max(36.0, (self.height() - panel_height) / 2)
-        panel = QRectF(
-            (self.width() - panel_width) / 2,
-            top,
-            panel_width,
-            panel_height,
+        width = max(280.0, min(680.0, self.width() * 0.45))
+        search = QRectF((self.width() - width) / 2, 8, width, 34)
+        no_match = bool(self.deck_query) and self.matching_deck_index is None
+        border = (
+            self.theme.error
+            if no_match
+            else self.theme.alpha(self.theme.muted, 210)
         )
-
-        painter.setPen(QPen(self.theme.alpha(self.theme.muted, 220), 1))
-        painter.setBrush(self.theme.alpha(self.theme.card, 250))
-        painter.drawRoundedRect(panel, 13, 13)
-
-        search = panel.adjusted(14, 14, -14, 0)
-        search.setHeight(48)
-        painter.setPen(QPen(self.theme.alpha(self.theme.muted, 210), 1))
+        painter.setPen(QPen(border, 2 if no_match else 1))
         painter.setBrush(self.theme.alpha(self.theme.card, 255))
-        painter.drawRoundedRect(search, 9, 9)
-        painter.setFont(QFont("Inter", 14, QFont.DemiBold))
+        painter.drawRoundedRect(search, 10, 10)
+        painter.setFont(QFont("Inter", 13, QFont.DemiBold))
         painter.setPen(
             self.theme.text
             if self.deck_query
             else self.theme.alpha(self.theme.body_text, 150)
         )
         search_text = self.deck_query if self.deck_query else "Find a deck..."
-        painter.drawText(search.adjusted(16, 0, -54, 0), Qt.AlignVCenter, search_text)
-        painter.setFont(QFont("Inter", 11, QFont.DemiBold))
-        painter.setPen(self.theme.alpha(self.theme.body_text, 155))
-        painter.drawText(
-            search.adjusted(0, 0, -14, 0),
-            Qt.AlignVCenter | Qt.AlignRight,
-            str(len(matches)),
-        )
-
-        results_top = search.bottom() + 8
-        if not matches:
-            painter.setFont(QFont("Inter", 13))
-            painter.setPen(self.theme.alpha(self.theme.body_text, 190))
-            message = f'No decks match "{self.deck_query}"'
-            painter.drawText(
-                QRectF(panel.left() + 20, results_top, panel.width() - 40, row_height),
-                Qt.AlignCenter,
-                message,
-            )
-            painter.restore()
-            return
-
-        start = max(
-            0,
-            min(
-                self.deck_result_index - visible_count // 2,
-                len(matches) - visible_count,
-            ),
-        )
-        for visible_index, match_position in enumerate(
-            range(start, start + visible_count)
-        ):
-            deck_index = matches[match_position]
-            deck = self.decks[deck_index]
-            row = QRectF(
-                panel.left() + 14,
-                results_top + visible_index * row_height,
-                panel.width() - 28,
-                row_height - 3,
-            )
-            selected = match_position == self.deck_result_index
-            if selected:
-                painter.setPen(QPen(self.theme.selected_border, 2))
-                painter.setBrush(self.theme.accent)
-                painter.drawRoundedRect(row, 8, 8)
-                text_color = self.theme.selected_text
-            else:
-                painter.setPen(QPen(self.theme.alpha(self.theme.muted, 95), 1))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(row, 8, 8)
-                text_color = self.theme.text
-
-            painter.setPen(text_color)
-            painter.setFont(QFont("Inter", 14, QFont.DemiBold))
-            painter.drawText(row.adjusted(16, 0, -170, 0), Qt.AlignVCenter, deck.name)
-            count = len(deck.cards)
-            meta = f"{count} card" + ("" if count == 1 else "s")
-            if deck_index == self.deck_index:
-                meta = f"Current  ·  {meta}"
-            painter.setFont(QFont("Inter", 10, QFont.DemiBold))
-            painter.setPen(self.theme.alpha(text_color, 205))
-            painter.drawText(
-                row.adjusted(0, 0, -16, 0),
-                Qt.AlignVCenter | Qt.AlignRight,
-                meta,
-            )
-
-        painter.restore()
+        painter.drawText(search.adjusted(16, 0, -16, 0), Qt.AlignVCenter, search_text)
 
     def draw_cards(self, painter: QPainter):
         """Draw all cards for the active deck.

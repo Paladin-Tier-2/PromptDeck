@@ -16,8 +16,7 @@
 
 | Key | Action |
 | --- | --- |
-| Type | Filter deck names |
-| Arrow keys or `Tab` / `Shift+Tab` | Move through matches |
-| `Enter` | Open the selected deck |
+| Type | Preview the first alphabetical deck starting with the query |
+| `Enter` | Keep the previewed deck |
 | `Backspace` | Delete one character; close when the query is empty |
-| `Esc` | Return to the current cards |
+| `Esc` | Restore the deck and card shown before searching |

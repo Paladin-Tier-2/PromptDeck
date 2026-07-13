@@ -7,7 +7,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QPalette
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from unittest.mock import patch
 
@@ -27,6 +26,7 @@ class AppTests(unittest.TestCase):
             Deck("AI", [Card("Tone", "Tone\n", "T"), Card("Email", "Email\n", "E")]),
             Deck("Solid State", [Card("Teaching", "Teaching\n", "T")]),
             Deck("Microscopy", [Card("Images", "Images\n", "I")]),
+            Deck("Solid Advice", [Card("Review", "Review\n", "R")]),
         ]
         return PromptDeck(AppConfig(path, path, Appearance(), decks))
 
@@ -74,7 +74,7 @@ class AppTests(unittest.TestCase):
                 widget.focusOutEvent(event)
                 close.assert_called_once()
 
-    def test_deck_finder_filters_and_opens_without_card_shortcuts(self):
+    def test_deck_finder_previews_and_commits_first_alphabetical_prefix(self):
         widget = self.deck_widget()
         self.press(widget, Qt.Key_E, "e")
         self.assertEqual(widget.card_index, 1)
@@ -83,59 +83,49 @@ class AppTests(unittest.TestCase):
         self.type_text(widget, "solid")
         self.assertTrue(widget.deck_finder_open)
         self.assertEqual(widget.deck_query, "solid")
-        self.assertEqual(widget.matching_deck_indices, [1])
-        self.assertEqual(widget.card_index, 1)
-
-        self.press(widget, Qt.Key_Return)
-        self.assertFalse(widget.deck_finder_open)
-        self.assertEqual(widget.deck_index, 1)
+        self.assertEqual(widget.deck.name, "Solid Advice")
         self.assertEqual(widget.card_index, 0)
 
-    def test_deck_finder_navigation_and_exit_preserve_current_card(self):
-        widget = self.deck_widget()
-        widget.deck_index = 1
-        self.press(widget, Qt.Key_Slash, "/")
-        self.assertEqual(widget.deck_result_index, 1)
-
-        self.press(widget, Qt.Key_Tab)
-        self.assertEqual(widget.deck_result_index, 2)
-        self.press(widget, Qt.Key_Tab, modifiers=Qt.ShiftModifier)
-        self.assertEqual(widget.deck_result_index, 1)
-
-        self.type_text(widget, "ai")
-        self.press(widget, Qt.Key_Backspace)
-        self.press(widget, Qt.Key_Backspace)
-        self.assertTrue(widget.deck_finder_open)
-        self.press(widget, Qt.Key_Backspace)
+        self.press(widget, Qt.Key_Return)
         self.assertFalse(widget.deck_finder_open)
-        self.assertEqual(widget.deck_index, 1)
+        self.assertEqual(widget.deck.name, "Solid Advice")
+        self.assertEqual(widget.card_index, 0)
 
+    def test_deck_finder_escape_restores_original_deck_and_card(self):
+        widget = self.deck_widget()
+        widget.card_index = 1
         self.press(widget, Qt.Key_Slash, "/")
         self.type_text(widget, "micro")
+        self.assertEqual(widget.deck.name, "Microscopy")
         self.press(widget, Qt.Key_Escape)
         self.assertFalse(widget.deck_finder_open)
-        self.assertEqual(widget.deck_index, 1)
+        self.assertEqual(widget.deck.name, "AI")
+        self.assertEqual(widget.card_index, 1)
 
-    def test_deck_finder_keeps_no_match_open_until_escape(self):
+    def test_deck_finder_empty_and_no_match_restore_original_cards(self):
         widget = self.deck_widget()
+        widget.card_index = 1
         self.press(widget, Qt.Key_Slash, "/")
-        self.type_text(widget, "zzz")
-        self.assertEqual(widget.matching_deck_indices, [])
+        self.type_text(widget, "micro")
+        self.assertEqual(widget.deck.name, "Microscopy")
+        for _ in "micro":
+            self.press(widget, Qt.Key_Backspace)
+        self.assertTrue(widget.deck_finder_open)
+        self.assertEqual(widget.deck.name, "AI")
+        self.assertEqual(widget.card_index, 1)
+
+        self.type_text(widget, "state")
+        self.assertIsNone(widget.matching_deck_index)
+        self.assertEqual(widget.deck.name, "AI")
+        self.assertEqual(widget.card_index, 1)
         self.press(widget, Qt.Key_Return)
         self.assertTrue(widget.deck_finder_open)
-        self.assertEqual(widget.deck_index, 0)
-        self.press(widget, Qt.Key_Escape)
+        for _ in "state":
+            self.press(widget, Qt.Key_Backspace)
+        self.press(widget, Qt.Key_Backspace)
         self.assertFalse(widget.deck_finder_open)
-
-    def test_deck_finder_animates_in_and_out(self):
-        widget = self.deck_widget()
-        self.press(widget, Qt.Key_Slash, "/")
-        QTest.qWait(150)
-        self.assertAlmostEqual(widget.deck_finder_progress, 1.0)
-
-        self.press(widget, Qt.Key_Escape)
-        QTest.qWait(150)
-        self.assertAlmostEqual(widget.deck_finder_progress, 0.0)
+        self.assertEqual(widget.deck.name, "AI")
+        self.assertEqual(widget.card_index, 1)
 
     def test_setup_dialog_returns_visible_choices(self):
         source = Path("/example/decks.toml")
