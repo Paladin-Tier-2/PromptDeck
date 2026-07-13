@@ -1,14 +1,14 @@
 # PromptDeck
 
-PromptDeck is a small keyboard-first prompt picker for Linux desktops running Wayland. It opens as a full-screen overlay, lets me choose a saved prompt, copies it to the clipboard, and gets out of the way.
+PromptDeck is a small keyboard-first prompt picker. It opens as a full-screen overlay, lets me choose a saved prompt, copies it to the clipboard, and gets out of the way.
 
 I built it because I wanted my recurring prompts available from one global shortcut without searching through notes or keeping another application open.
 
-The current version is written for my Fedora KDE setup. It uses Qt for the interface, `wl-copy` for the Wayland clipboard, and `notify-send` for the confirmation message.
+The interface is built with Qt. On Linux it uses `wl-copy` for the Wayland clipboard and `notify-send` for the confirmation message. On Windows it uses the Qt clipboard directly.
 
 ## Setup
 
-PromptDeck currently reads `~/PromptDeck/decks.toml`, so clone it at that path:
+### Linux
 
 ```bash
 git clone https://github.com/Paladin-Tier-2/PromptDeck.git ~/PromptDeck
@@ -24,6 +24,18 @@ On Fedora, install the two small desktop dependencies:
 
 ```bash
 sudo dnf install wl-clipboard libnotify
+```
+
+### Windows
+
+```powershell
+git clone --branch windows-support https://github.com/Paladin-Tier-2/PromptDeck.git
+cd PromptDeck
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item examples\decks.toml decks.toml
+python prompt_deck.py
 ```
 
 Your `decks.toml` file is ignored by Git. Prompt text often becomes personal, so the repository includes only a generic example.
@@ -77,4 +89,4 @@ If no daemon is running, the same command starts PromptDeck normally.
 
 ## Platform support
 
-The `main` branch is the Linux/Wayland version I use. Windows support is being kept on a separate branch until it is tested on Windows.
+The `main` branch is the Linux/Wayland version I use. This branch adds Windows support, but it still needs testing on a real Windows machine.

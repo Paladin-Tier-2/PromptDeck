@@ -5,6 +5,7 @@ import pathlib
 import socket
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,9 +24,13 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
-SOURCE = Path.home() / "PromptDeck" / "decks.toml"
+IS_WINDOWS = sys.platform == "win32"
+SOURCE = Path(__file__).resolve().parent / "decks.toml"
 LEGACY_SOURCE = Path.home() / ".config" / "prompt-deck" / "decks.toml"
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+if IS_WINDOWS:
+    RUNTIME_DIR = Path(tempfile.gettempdir())
+else:
+    RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
 SOCKET = RUNTIME_DIR / "prompt-deck.sock"
 
 
@@ -256,7 +261,8 @@ class PromptDeck(QWidget):
         self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server_socket.setblocking(False)
         self.server_socket.bind(str(SOCKET))
-        os.chmod(SOCKET, 0o600)
+        if not IS_WINDOWS:
+            os.chmod(SOCKET, 0o600)
         self.server_socket.listen(8)
 
         self.server_notifier = QSocketNotifier(
@@ -397,9 +403,14 @@ class PromptDeck(QWidget):
         self.update()
 
     def copy_selected(self):
-        """Copy the selected card body to the Wayland clipboard."""
+        """Copy the selected card body to the system clipboard."""
         text = self.card.body
         try:
+            if IS_WINDOWS:
+                QApplication.clipboard().setText(text)
+                self.close()
+                return
+
             subprocess.run(["wl-copy"], input=text, text=True, check=True)
             subprocess.Popen(
                 ["notify-send", "Prompt Deck", f"Copied: {self.card.title}"],
