@@ -17,6 +17,7 @@
 | Key | Action |
 | --- | --- |
 | Type | Preview the first alphabetical deck starting with the query |
+| `↑` / `↓` | Move through suggestions and preview each deck |
 | `Enter` | Keep the previewed deck |
 | `Backspace` | Delete one character; close when the query is empty |
 | `Esc` | Restore the deck and card shown before searching |

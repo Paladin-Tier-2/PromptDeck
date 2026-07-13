@@ -73,12 +73,18 @@ class ThemeColors:
             return palette.color(role) if value == "system" else QColor(value)
 
         accent = color(appearance.selected_background, QPalette.Accent)
+        def linear(channel: int) -> float:
+            value = channel / 255
+            if value <= 0.04045:
+                return value / 12.92
+            return ((value + 0.055) / 1.055) ** 2.4
+
         luminance = (
-            0.2126 * accent.red()
-            + 0.7152 * accent.green()
-            + 0.0722 * accent.blue()
-        ) / 255
-        selected_text = QColor("#000000" if luminance > 0.55 else "#ffffff")
+            0.2126 * linear(accent.red())
+            + 0.7152 * linear(accent.green())
+            + 0.0722 * linear(accent.blue())
+        )
+        selected_text = QColor("#000000" if luminance > 0.179 else "#ffffff")
         return cls(
             color(appearance.card_text, QPalette.WindowText),
             color(appearance.card_text, QPalette.Text),
@@ -158,6 +164,7 @@ class PromptDeck(QWidget):
         self.card_index = 0
         self.deck_finder_open = False
         self.deck_query = ""
+        self.deck_result_index = 0
         self.deck_origin_index = 0
         self.deck_origin_card_index = 0
         self.selection_visible = False
@@ -225,6 +232,7 @@ class PromptDeck(QWidget):
             self.status = f"Load failed: {exc}"
         self.deck_finder_open = False
         self.deck_query = ""
+        self.deck_result_index = 0
         self.deck_origin_index = 0
         self.deck_origin_card_index = 0
         self.has_been_active = False
@@ -368,7 +376,8 @@ class PromptDeck(QWidget):
         """
         if not self.deck_query.strip():
             return None
-        return next(iter(self.matching_deck_indices), None)
+        matches = self.matching_deck_indices
+        return matches[self.deck_result_index % len(matches)] if matches else None
 
     def open_deck_finder(self) -> None:
         """Open search and remember the exact card shown before previewing."""
@@ -376,6 +385,7 @@ class PromptDeck(QWidget):
         self.deck_query = ""
         self.deck_origin_index = self.deck_index
         self.deck_origin_card_index = self.card_index
+        self.deck_result_index = self.matching_deck_indices.index(self.deck_index)
         self.update()
 
     def close_deck_finder(self, restore: bool = False) -> None:
@@ -421,7 +431,23 @@ class PromptDeck(QWidget):
                 self.close_deck_finder(restore=True)
                 return
             self.deck_query = self.deck_query[:-1]
+            self.deck_result_index = (
+                0
+                if self.deck_query
+                else self.matching_deck_indices.index(self.deck_origin_index)
+            )
             self.preview_deck_query()
+            return
+        if key in (Qt.Key_Up, Qt.Key_Down):
+            matches = self.matching_deck_indices
+            if matches:
+                delta = -1 if key == Qt.Key_Up else 1
+                self.deck_result_index = (
+                    self.deck_result_index + delta
+                ) % len(matches)
+                self.deck_index = matches[self.deck_result_index]
+                self.card_index = 0
+                self.update()
             return
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if not self.deck_query or self.matching_deck_index is not None:
@@ -432,6 +458,7 @@ class PromptDeck(QWidget):
         text = event.text()
         if text and text.isprintable() and not event.modifiers() & blocked:
             self.deck_query += text
+            self.deck_result_index = 0
             self.preview_deck_query()
 
     def changeEvent(self, event):
@@ -616,9 +643,7 @@ class PromptDeck(QWidget):
         painter.setBrush(self.theme.alpha(self.theme.card, 250))
         painter.drawRoundedRect(panel, 10, 10)
 
-        selected = self.matching_deck_index
-        if selected is None:
-            selected = self.deck_index
+        selected = matches[self.deck_result_index % len(matches)]
         for position, deck_index in enumerate(matches):
             row = QRectF(
                 panel.left() + 4,

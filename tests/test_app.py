@@ -47,8 +47,12 @@ class AppTests(unittest.TestCase):
         light = ThemeColors.from_palette(
             palette, Appearance(selected_background="#f0eedd")
         )
+        blue = ThemeColors.from_palette(
+            palette, Appearance(selected_background="#308cc6")
+        )
         self.assertEqual(dark.selected_text, QColor("#ffffff"))
         self.assertEqual(light.selected_text, QColor("#000000"))
+        self.assertEqual(blue.selected_text, QColor("#000000"))
         palette.setColor(QPalette.Accent, QColor("#f0eedd"))
         system = ThemeColors.from_palette(palette, Appearance())
         self.assertEqual(system.selected_text, QColor("#000000"))
@@ -96,9 +100,15 @@ class AppTests(unittest.TestCase):
         self.assertEqual(widget.deck.name, "Solid Advice")
         self.assertEqual(widget.card_index, 0)
 
+        self.press(widget, Qt.Key_Down)
+        self.assertEqual(widget.deck.name, "Solid State")
+        self.press(widget, Qt.Key_Up)
+        self.assertEqual(widget.deck.name, "Solid Advice")
+        self.press(widget, Qt.Key_Down)
+
         self.press(widget, Qt.Key_Return)
         self.assertFalse(widget.deck_finder_open)
-        self.assertEqual(widget.deck.name, "Solid Advice")
+        self.assertEqual(widget.deck.name, "Solid State")
         self.assertEqual(widget.card_index, 0)
 
     def test_deck_finder_escape_restores_original_deck_and_card(self):
