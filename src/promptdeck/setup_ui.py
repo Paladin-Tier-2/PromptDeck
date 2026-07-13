@@ -198,6 +198,9 @@ class SetupDialog(QDialog):
         privacy.setWordWrap(True)
         layout.addWidget(privacy)
         layout.addSpacing(10)
+        controls = QLabel("Tab cycles decks  ·  / finds a deck  ·  Enter copies")
+        controls.setStyleSheet("font-family: monospace; color: palette(mid)")
+        layout.addWidget(controls)
         layout.addWidget(self.service)
         layout.addStretch()
 

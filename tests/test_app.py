@@ -5,8 +5,9 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent
-from PySide6.QtGui import QColor, QFocusEvent, QPalette
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from unittest.mock import patch
 
@@ -19,6 +20,24 @@ class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def deck_widget(self):
+        path = Path("/example/decks.toml")
+        decks = [
+            Deck("AI", [Card("Tone", "Tone\n", "T"), Card("Email", "Email\n", "E")]),
+            Deck("Solid State", [Card("Teaching", "Teaching\n", "T")]),
+            Deck("Microscopy", [Card("Images", "Images\n", "I")]),
+        ]
+        return PromptDeck(AppConfig(path, path, Appearance(), decks))
+
+    def press(self, widget, key, text="", modifiers=Qt.NoModifier):
+        event = QKeyEvent(QEvent.KeyPress, key, modifiers, text)
+        widget.keyPressEvent(event)
+
+    def type_text(self, widget, text):
+        for character in text:
+            key = Qt.Key_Space if character == " " else ord(character.upper())
+            self.press(widget, key, character)
 
     def test_custom_accent_uses_readable_selected_text(self):
         palette = QPalette()
@@ -54,6 +73,69 @@ class AppTests(unittest.TestCase):
                 widget.has_been_active = True
                 widget.focusOutEvent(event)
                 close.assert_called_once()
+
+    def test_deck_finder_filters_and_opens_without_card_shortcuts(self):
+        widget = self.deck_widget()
+        self.press(widget, Qt.Key_E, "e")
+        self.assertEqual(widget.card_index, 1)
+
+        self.press(widget, Qt.Key_Slash, "/")
+        self.type_text(widget, "solid")
+        self.assertTrue(widget.deck_finder_open)
+        self.assertEqual(widget.deck_query, "solid")
+        self.assertEqual(widget.matching_deck_indices, [1])
+        self.assertEqual(widget.card_index, 1)
+
+        self.press(widget, Qt.Key_Return)
+        self.assertFalse(widget.deck_finder_open)
+        self.assertEqual(widget.deck_index, 1)
+        self.assertEqual(widget.card_index, 0)
+
+    def test_deck_finder_navigation_and_exit_preserve_current_card(self):
+        widget = self.deck_widget()
+        widget.deck_index = 1
+        self.press(widget, Qt.Key_Slash, "/")
+        self.assertEqual(widget.deck_result_index, 1)
+
+        self.press(widget, Qt.Key_Tab)
+        self.assertEqual(widget.deck_result_index, 2)
+        self.press(widget, Qt.Key_Tab, modifiers=Qt.ShiftModifier)
+        self.assertEqual(widget.deck_result_index, 1)
+
+        self.type_text(widget, "ai")
+        self.press(widget, Qt.Key_Backspace)
+        self.press(widget, Qt.Key_Backspace)
+        self.assertTrue(widget.deck_finder_open)
+        self.press(widget, Qt.Key_Backspace)
+        self.assertFalse(widget.deck_finder_open)
+        self.assertEqual(widget.deck_index, 1)
+
+        self.press(widget, Qt.Key_Slash, "/")
+        self.type_text(widget, "micro")
+        self.press(widget, Qt.Key_Escape)
+        self.assertFalse(widget.deck_finder_open)
+        self.assertEqual(widget.deck_index, 1)
+
+    def test_deck_finder_keeps_no_match_open_until_escape(self):
+        widget = self.deck_widget()
+        self.press(widget, Qt.Key_Slash, "/")
+        self.type_text(widget, "zzz")
+        self.assertEqual(widget.matching_deck_indices, [])
+        self.press(widget, Qt.Key_Return)
+        self.assertTrue(widget.deck_finder_open)
+        self.assertEqual(widget.deck_index, 0)
+        self.press(widget, Qt.Key_Escape)
+        self.assertFalse(widget.deck_finder_open)
+
+    def test_deck_finder_animates_in_and_out(self):
+        widget = self.deck_widget()
+        self.press(widget, Qt.Key_Slash, "/")
+        QTest.qWait(150)
+        self.assertAlmostEqual(widget.deck_finder_progress, 1.0)
+
+        self.press(widget, Qt.Key_Escape)
+        QTest.qWait(150)
+        self.assertAlmostEqual(widget.deck_finder_progress, 0.0)
 
     def test_setup_dialog_returns_visible_choices(self):
         source = Path("/example/decks.toml")
