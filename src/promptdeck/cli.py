@@ -19,6 +19,7 @@ from .config import (
     load_app_config,
     valid_color,
 )
+from .ipc import request_existing_daemon
 
 
 SAMPLE_DECKS = '''[[decks]]
@@ -78,13 +79,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "service":
         return service(args.action)
 
+    path = config_path(args.config)
+    use_daemon = args.command is None and args.config is None
+    if use_daemon and request_existing_daemon():
+        return 0
+
     from PySide6.QtCore import QTimer
 
-    from .app import QApplication, PromptDeck, request_existing_daemon
+    from .app import QApplication, PromptDeck
 
-    path = config_path(args.config)
-    if args.command is None and args.config is None and request_existing_daemon():
-        return 0
     try:
         config = load_app_config(path)
     except DeckConfigError as exc:

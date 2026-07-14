@@ -1,3 +1,4 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -6,6 +7,7 @@ from unittest.mock import patch
 from promptdeck.cli import (
     copy_tree_without_overwrite,
     finish_setup,
+    main,
     parser,
     service_unit,
 )
@@ -13,6 +15,16 @@ from promptdeck.config import Appearance, config_dir
 
 
 class CliTests(unittest.TestCase):
+    def test_daemon_fast_path_does_not_import_qt_application(self):
+        with (
+            patch("promptdeck.cli.request_existing_daemon", return_value=True),
+            patch.dict(
+                sys.modules,
+                {"PySide6.QtCore": None, "promptdeck.app": None},
+            ),
+        ):
+            self.assertEqual(main([]), 0)
+
     def test_parses_service_and_setup_commands(self):
         self.assertEqual(parser().parse_args(["service", "stop"]).action, "stop")
         self.assertTrue(parser().parse_args(["setup", "--yes"]).yes)
