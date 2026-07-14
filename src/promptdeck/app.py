@@ -6,9 +6,7 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 
 from PySide6.QtCore import QEvent, QRectF, QSocketNotifier, Qt
 from PySide6.QtGui import (
@@ -26,21 +24,33 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .config import AppConfig, Appearance, Card, Deck, load_app_config
+from .ipc import socket_path
 
 IS_WINDOWS = sys.platform == "win32"
 
-
-def socket_path() -> Path:
-    """Return the per-user daemon socket path."""
-    if IS_WINDOWS:
-        return Path(tempfile.gettempdir()) / "promptdeck.sock"
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-    return runtime / "promptdeck.sock"
-
-
 @dataclass(frozen=True)
 class ThemeColors:
-    """Colors derived from the active Qt palette and accent setting."""
+    """Colors derived from the active Qt palette and appearance settings.
+
+    Attributes
+    ----------
+    text : QColor
+        Primary text color.
+    body_text : QColor
+        Body text color.
+    card : QColor
+        Unselected card background.
+    muted : QColor
+        Muted border and badge color.
+    accent : QColor
+        Selected card background.
+    selected_border : QColor
+        Selected card outline.
+    selected_text : QColor
+        Automatically contrasting text for the selected card.
+    error : QColor
+        Error status color.
+    """
 
     text: QColor
     body_text: QColor
@@ -70,64 +80,118 @@ class ThemeColors:
             Resolved colors ready for painting.
         """
         def color(value: str, role: QPalette.ColorRole) -> QColor:
-            return palette.color(role) if value == "system" else QColor(value)
+            """Resolve one configured color against the desktop palette.
+
+            Parameters
+            ----------
+            value : str
+                ``system`` or a hexadecimal color value.
+            role : QPalette.ColorRole
+                Palette role used when ``value`` is ``system``.
+
+            Returns
+            -------
+            QColor
+                Resolved Qt color.
+            """
+            if value == "system":
+                return palette.color(role)
+
+            return QColor(value)
 
         accent = color(appearance.selected_background, QPalette.Accent)
-        def linear(channel: int) -> float:
-            value = channel / 255
-            if value <= 0.04045:
-                return value / 12.92
-            return ((value + 0.055) / 1.055) ** 2.4
 
-        luminance = (
-            0.2126 * linear(accent.red())
-            + 0.7152 * linear(accent.green())
-            + 0.0722 * linear(accent.blue())
-        )
-        selected_text = QColor("#000000" if luminance > 0.179 else "#ffffff")
+        def linear(channel: int) -> float:
+            """Convert one sRGB channel into linear light.
+
+            Parameters
+            ----------
+            channel : int
+                Eight-bit sRGB channel value.
+
+            Returns
+            -------
+            float
+                Channel intensity in linear-light space.
+            """
+            normalized = channel / 255
+
+            if normalized <= 0.04045:
+                return normalized / 12.92
+
+            return ((normalized + 0.055) / 1.055) ** 2.4
+
+        red = linear(accent.red())
+        green = linear(accent.green())
+        blue = linear(accent.blue())
+        luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+        selected_text_value = "#ffffff"
+        if luminance > 0.179:
+            selected_text_value = "#000000"
+
+        selected_text = QColor(selected_text_value)
+
         return cls(
-            color(appearance.card_text, QPalette.WindowText),
-            color(appearance.card_text, QPalette.Text),
-            color(appearance.card_background, QPalette.Button),
-            color(appearance.card_border, QPalette.Mid),
-            accent,
-            color(appearance.selected_border, QPalette.Accent),
-            selected_text,
-            palette.color(QPalette.BrightText),
+            text=color(appearance.card_text, QPalette.WindowText),
+            body_text=color(appearance.card_text, QPalette.Text),
+            card=color(appearance.card_background, QPalette.Button),
+            muted=color(appearance.card_border, QPalette.Mid),
+            accent=accent,
+            selected_border=color(appearance.selected_border, QPalette.Accent),
+            selected_text=selected_text,
+            error=palette.color(QPalette.BrightText),
         )
 
     def alpha(self, color: QColor, opacity: int) -> QColor:
-        """Return a copy of *color* with the requested opacity."""
+        """Return a color with a different opacity.
+
+        Parameters
+        ----------
+        color : QColor
+            Source color.
+        opacity : int
+            Alpha channel value from 0 through 255.
+
+        Returns
+        -------
+        QColor
+            Copy of ``color`` with the requested opacity.
+        """
         result = QColor(color)
         result.setAlpha(opacity)
+
         return result
 
     def lighter(self, factor: int) -> QColor:
-        """Return a lighter accent color."""
+        """Return a lighter accent color.
+
+        Parameters
+        ----------
+        factor : int
+            Qt lightness factor, where 100 leaves the color unchanged.
+
+        Returns
+        -------
+        QColor
+            Lightened accent color.
+        """
         return self.accent.lighter(factor)
 
     def darker(self, factor: int) -> QColor:
-        """Return a darker accent color."""
+        """Return a darker accent color.
+
+        Parameters
+        ----------
+        factor : int
+            Qt darkness factor, where 100 leaves the color unchanged.
+
+        Returns
+        -------
+        QColor
+            Darkened accent color.
+        """
         return self.accent.darker(factor)
-
-
-def request_existing_daemon() -> bool:
-    """Ask an already running daemon to show the deck window.
-
-    Returns
-    -------
-    bool
-        ``True`` if a daemon accepted the request, otherwise ``False``.
-    """
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(0.08)
-            client.connect(str(socket_path()))
-            client.sendall(b"show\n")
-        return True
-    except OSError:
-        return False
-
 
 class PromptDeck(QWidget):
     """Qt widget that displays and controls the prompt deck UI."""
