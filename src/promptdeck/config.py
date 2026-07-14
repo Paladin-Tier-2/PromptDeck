@@ -367,8 +367,26 @@ def load_decks(source: Path) -> list[Deck]:
 
 
 def _read_toml(path: Path) -> dict:
+    """Read one TOML file with a configuration-specific error message.
+
+    Parameters
+    ----------
+    path : Path
+        TOML file to read.
+
+    Returns
+    -------
+    dict
+        Parsed TOML data.
+
+    Raises
+    ------
+    DeckConfigError
+        If ``path`` is missing, unreadable, or invalid TOML.
+    """
     if not path.is_file():
         raise DeckConfigError(f"Configuration not found: {path}")
+
     try:
         with path.open("rb") as source:
             return tomllib.load(source)
@@ -377,48 +395,143 @@ def _read_toml(path: Path) -> dict:
 
 
 def _parse_decks(raw_decks: object, path: Path) -> list[Deck]:
+    """Validate raw deck tables and convert them into deck objects.
+
+    Parameters
+    ----------
+    raw_decks : object
+        Value read from the TOML ``decks`` key.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    list[Deck]
+        Validated deck objects in source order.
+
+    Raises
+    ------
+    DeckConfigError
+        If a deck or card has an invalid shape or required value.
+    """
     if not isinstance(raw_decks, list):
         raise DeckConfigError(f"'decks' must be a list in {path}")
 
-    decks = []
-    for deck_index, raw_deck in enumerate(raw_decks, start=1):
-        if not isinstance(raw_deck, dict):
+    decks: list[Deck] = []
+    for deck_index, deck_data in enumerate(raw_decks, start=1):
+        if not isinstance(deck_data, dict):
             raise DeckConfigError(f"Deck {deck_index} must be a table in {path}")
 
-        name = _required_text(raw_deck, "name", f"deck {deck_index}", path)
-        raw_cards = raw_deck.get("cards", [])
-        if not isinstance(raw_cards, list) or not raw_cards:
-            raise DeckConfigError(f"Deck '{name}' needs at least one card in {path}")
+        deck_name = _required_text(
+            deck_data,
+            "name",
+            f"deck {deck_index}",
+            path,
+        )
+        card_data_list = deck_data.get("cards", [])
 
-        cards = []
-        for card_index, raw_card in enumerate(raw_cards, start=1):
-            if not isinstance(raw_card, dict):
+        if not isinstance(card_data_list, list):
+            message = f"'cards' must be a list for deck '{deck_name}' in {path}"
+            raise DeckConfigError(message)
+
+        if not card_data_list:
+            raise DeckConfigError(
+                f"Deck '{deck_name}' needs at least one card in {path}"
+            )
+
+        cards: list[Card] = []
+        for card_index, card_data in enumerate(card_data_list, start=1):
+            if not isinstance(card_data, dict):
                 raise DeckConfigError(
-                    f"Card {card_index} in deck '{name}' must be a table in {path}"
+                    f"Card {card_index} in deck '{deck_name}' must be a table in {path}"
                 )
-            context = f"card {card_index} in deck '{name}'"
-            title = _required_text(raw_card, "title", context, path)
-            body = _required_text(raw_card, "body", context, path) + "\n"
-            key = raw_card.get("key", "")
+
+            context = f"card {card_index} in deck '{deck_name}'"
+            title = _required_text(card_data, "title", context, path)
+            body = _required_text(card_data, "body", context, path) + "\n"
+            key = card_data.get("key", "")
+
             if not isinstance(key, str):
                 raise DeckConfigError(f"'key' must be text for {context} in {path}")
-            cards.append(Card(title=title, body=body, key=key.strip()))
 
-        decks.append(Deck(name=name, cards=cards))
+            card = Card(
+                title=title,
+                body=body,
+                key=key.strip(),
+            )
+            cards.append(card)
+
+        deck = Deck(
+            name=deck_name,
+            cards=cards,
+        )
+        decks.append(deck)
+
     return decks
 
 
 def _required_text(data: dict, field: str, context: str, path: Path) -> str:
+    """Read and normalize one required text field.
+
+    Parameters
+    ----------
+    data : dict
+        TOML table containing the field.
+    field : str
+        Field name to read.
+    context : str
+        Human-readable deck or card description for errors.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    str
+        Stripped non-empty field value.
+
+    Raises
+    ------
+    DeckConfigError
+        If the field is missing, not text, or empty.
+    """
     value = data.get(field)
-    if not isinstance(value, str) or not value.strip():
+
+    if not isinstance(value, str):
         message = f"'{field}' must be non-empty text for {context} in {path}"
         raise DeckConfigError(message)
+
+    if not value.strip():
+        message = f"'{field}' must be non-empty text for {context} in {path}"
+        raise DeckConfigError(message)
+
     return value.strip()
 
 
 def _include_patterns(raw_patterns: object, path: Path) -> list[str]:
-    if not isinstance(raw_patterns, list) or not all(
-        isinstance(pattern, str) for pattern in raw_patterns
-    ):
+    """Validate include patterns from one TOML file.
+
+    Parameters
+    ----------
+    raw_patterns : object
+        Value read from the TOML ``include`` key.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    list[str]
+        Include patterns in source order.
+
+    Raises
+    ------
+    DeckConfigError
+        If the value is not a list of strings.
+    """
+    if not isinstance(raw_patterns, list):
         raise DeckConfigError(f"'include' must be a list of paths in {path}")
+
+    for pattern in raw_patterns:
+        if not isinstance(pattern, str):
+            raise DeckConfigError(f"'include' must be a list of paths in {path}")
+
     return raw_patterns
