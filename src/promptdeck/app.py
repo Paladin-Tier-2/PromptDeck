@@ -276,9 +276,12 @@ class PromptDeck(QWidget):
 
     def move_to_cursor_screen(self):
         """Resize the window to the screen under the mouse cursor."""
-        screen = (
-            QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        )
+        cursor_position = QCursor.pos()
+        screen = QGuiApplication.screenAt(cursor_position)
+
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+
         self.setGeometry(screen.availableGeometry())
 
     def show_deck(self):
@@ -286,24 +289,29 @@ class PromptDeck(QWidget):
         try:
             config = load_app_config(self.config_path)
             self.decks = config.decks
+            palette = QApplication.palette()
             self.theme = ThemeColors.from_palette(
-                QApplication.palette(), config.appearance
+                palette,
+                config.appearance,
             )
             self.deck_index = 0
             self.card_index = 0
             self.status = ""
         except Exception as exc:
             self.status = f"Load failed: {exc}"
+
         self.deck_finder_open = False
         self.deck_query = ""
         self.deck_result_index = 0
         self.deck_origin_index = 0
         self.deck_origin_card_index = 0
         self.has_been_active = False
+
         self.move_to_cursor_screen()
         self.show()
         self.raise_()
         self.activateWindow()
+
         self.selection_visible = True
         self.update()
 
@@ -315,25 +323,32 @@ class PromptDeck(QWidget):
         appearance : Appearance
             Values to resolve against the active desktop palette.
         """
-        self.theme = ThemeColors.from_palette(QApplication.palette(), appearance)
+        palette = QApplication.palette()
+        self.theme = ThemeColors.from_palette(palette, appearance)
         self.update()
 
     def start_server(self):
         """Start the local socket server used by daemon mode."""
         path = socket_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+
         if path.exists():
             path.unlink()
 
-        self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_socket.setblocking(False)
-        self.server_socket.bind(str(path))
+        server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server_socket.setblocking(False)
+        server_socket.bind(str(path))
+
         if not IS_WINDOWS:
             os.chmod(path, 0o600)
-        self.server_socket.listen(8)
+
+        server_socket.listen(8)
+        self.server_socket = server_socket
 
         self.server_notifier = QSocketNotifier(
-            self.server_socket.fileno(), QSocketNotifier.Read, self
+            server_socket.fileno(),
+            QSocketNotifier.Read,
+            self,
         )
         self.server_notifier.activated.connect(self.handle_server_request)
 
@@ -346,8 +361,10 @@ class PromptDeck(QWidget):
                 connection, _ = self.server_socket.accept()
             except BlockingIOError:
                 return
+
             with connection:
                 connection.recv(64)
+
             self.show_deck()
 
     def keyPressEvent(self, event):
@@ -360,53 +377,86 @@ class PromptDeck(QWidget):
         """
         self.selection_visible = True
         key = event.key()
+
         if self.deck_finder_open:
             self.handle_deck_finder_key(event)
             return
-        if key == Qt.Key_Slash or event.text() == "/":
+
+        slash_pressed = key == Qt.Key_Slash or event.text() == "/"
+        if slash_pressed:
             self.open_deck_finder()
             return
+
         if key in (Qt.Key_Escape, Qt.Key_Backspace):
             self.close()
             return
+
         if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
             self.copy_selected()
             return
+
         if key in (Qt.Key_Right, Qt.Key_L):
             self.move_selection(1)
             return
+
         if key in (Qt.Key_Left, Qt.Key_H):
             self.move_selection(-1)
             return
+
         if key in (Qt.Key_Down, Qt.Key_J):
-            self.move_selection(self.grid_dimensions(len(self.deck.cards))[0])
+            card_count = len(self.deck.cards)
+            columns, _ = self.grid_dimensions(card_count)
+            self.move_selection(columns)
             return
+
         if key in (Qt.Key_Up, Qt.Key_K):
-            self.move_selection(-self.grid_dimensions(len(self.deck.cards))[0])
+            card_count = len(self.deck.cards)
+            columns, _ = self.grid_dimensions(card_count)
+            self.move_selection(-columns)
             return
+
         if key == Qt.Key_Tab:
-            self.switch_deck(-1 if event.modifiers() & Qt.ShiftModifier else 1)
+            direction = 1
+            if event.modifiers() & Qt.ShiftModifier:
+                direction = -1
+
+            self.switch_deck(direction)
             return
 
         text = event.text().upper()
-        if text:
-            if text.isdigit():
-                index = 9 if text == "0" else int(text) - 1
-                if 0 <= index < len(self.deck.cards):
-                    self.card_index = index
-                    self.update()
-                    return
+        if not text:
+            super().keyPressEvent(event)
+            return
 
-            matches = [
-                i
-                for i, card in enumerate(self.deck.cards)
-                if card.title.upper().startswith(text) or card.key.upper() == text
-            ]
-            if matches:
-                next_matches = [i for i in matches if i > self.card_index]
-                self.card_index = next_matches[0] if next_matches else matches[0]
+        if text.isdigit():
+            index = int(text) - 1
+            if text == "0":
+                index = 9
+
+            if 0 <= index < len(self.deck.cards):
+                self.card_index = index
                 self.update()
                 return
+
+        matching_cards: list[int] = []
+        for index, card in enumerate(self.deck.cards):
+            title_matches = card.title.upper().startswith(text)
+            key_matches = card.key.upper() == text
+
+            if title_matches or key_matches:
+                matching_cards.append(index)
+
+        if matching_cards:
+            next_card = matching_cards[0]
+
+            for index in matching_cards:
+                if index > self.card_index:
+                    next_card = index
+                    break
+
+            self.card_index = next_card
+            self.update()
+            return
 
         super().keyPressEvent(event)
 
@@ -420,14 +470,33 @@ class PromptDeck(QWidget):
             Matching deck indices sorted by name and configured order.
         """
         query = self.deck_query.strip().casefold()
-        return sorted(
-            (
-                index
-                for index, deck in enumerate(self.decks)
-                if not query or deck.name.casefold().startswith(query)
-            ),
-            key=lambda index: (self.decks[index].name.casefold(), index),
-        )
+        matching_indices: list[int] = []
+
+        def deck_sort_key(index: int) -> tuple[str, int]:
+            """Return a stable alphabetical sort key for one deck.
+
+            Parameters
+            ----------
+            index : int
+                Deck index inside ``self.decks``.
+
+            Returns
+            -------
+            tuple[str, int]
+                Normalized deck name followed by its configured index.
+            """
+            normalized_name = self.decks[index].name.casefold()
+            return normalized_name, index
+
+        for index, deck in enumerate(self.decks):
+            normalized_name = deck.name.casefold()
+
+            query_matches = not query or normalized_name.startswith(query)
+            if query_matches:
+                matching_indices.append(index)
+
+        matching_indices.sort(key=deck_sort_key)
+        return matching_indices
 
     @property
     def matching_deck_index(self) -> int | None:
@@ -440,8 +509,13 @@ class PromptDeck(QWidget):
         """
         if not self.deck_query.strip():
             return None
+
         matches = self.matching_deck_indices
-        return matches[self.deck_result_index % len(matches)] if matches else None
+        if not matches:
+            return None
+
+        result_index = self.deck_result_index % len(matches)
+        return matches[result_index]
 
     def open_deck_finder(self) -> None:
         """Open search and remember the exact card shown before previewing."""
@@ -449,7 +523,9 @@ class PromptDeck(QWidget):
         self.deck_query = ""
         self.deck_origin_index = self.deck_index
         self.deck_origin_card_index = self.card_index
-        self.deck_result_index = self.matching_deck_indices.index(self.deck_index)
+
+        matching_indices = self.matching_deck_indices
+        self.deck_result_index = matching_indices.index(self.deck_index)
         self.update()
 
     def close_deck_finder(self, restore: bool = False) -> None:
@@ -463,6 +539,7 @@ class PromptDeck(QWidget):
         if restore:
             self.deck_index = self.deck_origin_index
             self.card_index = self.deck_origin_card_index
+
         self.deck_finder_open = False
         self.deck_query = ""
         self.update()
@@ -476,6 +553,7 @@ class PromptDeck(QWidget):
         else:
             self.deck_index = match
             self.card_index = 0
+
         self.update()
 
     def handle_deck_finder_key(self, event) -> None:
@@ -487,43 +565,67 @@ class PromptDeck(QWidget):
             Qt key press event passed by the window system.
         """
         key = event.key()
+
         if key == Qt.Key_Escape:
             self.close_deck_finder(restore=True)
             return
+
         if key == Qt.Key_Backspace:
             if not self.deck_query:
                 self.close_deck_finder(restore=True)
                 return
+
             self.deck_query = self.deck_query[:-1]
-            self.deck_result_index = (
-                0
-                if self.deck_query
-                else self.matching_deck_indices.index(self.deck_origin_index)
-            )
+
+            if self.deck_query:
+                self.deck_result_index = 0
+            else:
+                matching_indices = self.matching_deck_indices
+                self.deck_result_index = matching_indices.index(
+                    self.deck_origin_index
+                )
+
             self.preview_deck_query()
             return
+
         if key in (Qt.Key_Up, Qt.Key_Down):
             matches = self.matching_deck_indices
             if matches:
-                delta = -1 if key == Qt.Key_Up else 1
-                self.deck_result_index = (
-                    self.deck_result_index + delta
-                ) % len(matches)
+                delta = 1
+                if key == Qt.Key_Up:
+                    delta = -1
+
+                next_result = self.deck_result_index + delta
+                self.deck_result_index = next_result % len(matches)
                 self.deck_index = matches[self.deck_result_index]
                 self.card_index = 0
                 self.update()
+
             return
+
         if key in (Qt.Key_Return, Qt.Key_Enter):
-            if not self.deck_query or self.matching_deck_index is not None:
+            has_match = self.matching_deck_index is not None
+            if not self.deck_query or has_match:
                 self.close_deck_finder()
+
             return
 
         blocked = Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier
         text = event.text()
-        if text and text.isprintable() and not event.modifiers() & blocked:
-            self.deck_query += text
-            self.deck_result_index = 0
-            self.preview_deck_query()
+        has_blocked_modifier = bool(event.modifiers() & blocked)
+
+        if not text:
+            return
+
+        if not text.isprintable():
+            return
+
+        if has_blocked_modifier:
+            return
+
+        self.deck_query += text
+        self.deck_result_index = 0
+        self.preview_deck_query()
 
     def changeEvent(self, event):
         """Update selection visibility when window activation changes.
@@ -536,6 +638,7 @@ class PromptDeck(QWidget):
         if event.type() == QEvent.ActivationChange:
             self.selection_visible = self.isActiveWindow()
             self.update()
+
         super().changeEvent(event)
 
     def focusOutEvent(self, event):
@@ -551,10 +654,13 @@ class PromptDeck(QWidget):
             self.update()
             super().focusOutEvent(event)
             return
+
         self.selection_visible = False
         self.update()
+
         if self.has_been_active:
             self.close()
+
         super().focusOutEvent(event)
 
     def focusInEvent(self, event):
@@ -579,7 +685,12 @@ class PromptDeck(QWidget):
             Number of card positions to move. Positive moves forward;
             negative moves backward.
         """
-        self.card_index = max(0, min(len(self.deck.cards) - 1, self.card_index + delta))
+        last_card_index = len(self.deck.cards) - 1
+        requested_index = self.card_index + delta
+        next_index = min(last_card_index, requested_index)
+        next_index = max(0, next_index)
+
+        self.card_index = next_index
         self.status = ""
         self.update()
 
@@ -592,7 +703,8 @@ class PromptDeck(QWidget):
             Signed deck offset. ``1`` moves to the next deck and ``-1``
             moves to the previous deck.
         """
-        self.deck_index = (self.deck_index + direction) % len(self.decks)
+        requested_index = self.deck_index + direction
+        self.deck_index = requested_index % len(self.decks)
         self.card_index = 0
         self.status = ""
         self.update()
@@ -600,10 +712,15 @@ class PromptDeck(QWidget):
     def copy_selected(self):
         """Copy the selected card body to the system clipboard."""
         text = self.card.body
+
         try:
-            QApplication.clipboard().setText(text)
-            if not self.daemon and not IS_WINDOWS and shutil.which("wl-copy"):
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+
+            use_wayland_clipboard = not self.daemon and not IS_WINDOWS
+            if use_wayland_clipboard and shutil.which("wl-copy"):
                 subprocess.run(["wl-copy"], input=text, text=True, check=True)
+
             self.close()
         except Exception as exc:
             self.status = f"Copy failed: {exc}"
@@ -621,6 +738,7 @@ class PromptDeck(QWidget):
             event.ignore()
             self.hide()
             return
+
         super().closeEvent(event)
 
     def paintEvent(self, event):
@@ -636,30 +754,50 @@ class PromptDeck(QWidget):
 
         if not self.embedded:
             self.draw_header(painter)
+
         self.draw_cards(painter)
         self.draw_status(painter)
+
         if self.deck_finder_open:
             self.draw_deck_search(painter)
 
     def draw_header(self, painter: QPainter):
-        """Draw the active deck name and position."""
+        """Draw the active deck name and position.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter used to draw on the overlay.
+        """
         font = QFont("Inter", 13, QFont.DemiBold)
         painter.setFont(font)
+
         label = f"{self.deck.name}  ·  {self.deck_index + 1}/{len(self.decks)}"
-        width = QFontMetrics(font).horizontalAdvance(label) + 28
+        metrics = QFontMetrics(font)
+        width = metrics.horizontalAdvance(label) + 28
         pill = QRectF(18, 8, width, 34)
+
         painter.setPen(QPen(self.theme.alpha(self.theme.muted, 190), 1))
         painter.setBrush(self.theme.alpha(self.theme.card, 240))
         painter.drawRoundedRect(pill, 10, 10)
+
         painter.setPen(self.theme.alpha(self.theme.text, 225))
         painter.drawText(pill, Qt.AlignCenter, label)
 
     def draw_status(self, painter: QPainter):
-        """Draw an error reported by loading or clipboard integration."""
+        """Draw an error reported by loading or clipboard integration.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter used to draw on the overlay.
+        """
         if not self.status:
             return
+
         painter.setPen(self.theme.error)
         painter.setFont(QFont("Inter", 12, QFont.DemiBold))
+
         rect = QRectF(30, self.height() - 38, self.width() - 60, 24)
         painter.drawText(rect, Qt.AlignCenter, self.status)
 
