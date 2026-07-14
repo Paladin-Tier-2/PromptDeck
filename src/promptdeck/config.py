@@ -4,10 +4,12 @@ import glob
 import os
 import re
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,12 +17,20 @@ from pathlib import Path
 class DeckConfigError(ValueError):
     """Raised when a settings or deck file is missing or invalid."""
 
-    pass
-
 
 @dataclass(frozen=True)
 class Card:
-    """One selectable prompt card."""
+    """One selectable prompt card.
+
+    Attributes
+    ----------
+    title : str
+        Short title displayed at the top of the card.
+    body : str
+        Prompt copied to the clipboard when the card is selected.
+    key : str
+        Optional keyboard shortcut shown on the card.
+    """
 
     title: str
     body: str
@@ -29,7 +39,15 @@ class Card:
 
 @dataclass(frozen=True)
 class Deck:
-    """A named collection of prompt cards."""
+    """A named collection of prompt cards.
+
+    Attributes
+    ----------
+    name : str
+        Deck name shown in the overlay header and deck finder.
+    cards : list[Card]
+        Cards displayed when this deck is active.
+    """
 
     name: str
     cards: list[Card]
@@ -71,7 +89,19 @@ APPEARANCE_COLOR_KEYS = (
 
 @dataclass(frozen=True)
 class AppConfig:
-    """Resolved settings, source paths, appearance, and decks."""
+    """Resolved PromptDeck configuration.
+
+    Attributes
+    ----------
+    path : Path
+        Path to the loaded application configuration.
+    deck_source : Path
+        Root TOML file containing decks or include patterns.
+    appearance : Appearance
+        Resolved appearance settings.
+    decks : list[Deck]
+        All decks loaded from ``deck_source``.
+    """
 
     path: Path
     deck_source: Path
@@ -80,24 +110,79 @@ class AppConfig:
 
 
 def config_dir() -> Path:
-    """Return the native per-user PromptDeck config directory."""
+    """Return the native per-user PromptDeck config directory.
+
+    Returns
+    -------
+    Path
+        ``%APPDATA%/PromptDeck`` on Windows or the XDG config directory on
+        other platforms.
+    """
     if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "PromptDeck"
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "promptdeck"
+        app_data = os.environ.get(
+            "APPDATA",
+            Path.home() / "AppData" / "Roaming",
+        )
+        return Path(app_data) / "PromptDeck"
+
+    config_home = os.environ.get(
+        "XDG_CONFIG_HOME",
+        Path.home() / ".config",
+    )
+    return Path(config_home) / "promptdeck"
 
 
 def config_path(explicit: Path | None = None) -> Path:
-    """Resolve config precedence: argument, environment, then native default."""
+    """Resolve the application configuration path.
+
+    Parameters
+    ----------
+    explicit : Path or None, optional
+        Path supplied with ``--config``. When omitted, the
+        ``PROMPTDECK_CONFIG`` environment variable and native default are
+        checked in that order.
+
+    Returns
+    -------
+    Path
+        Absolute path to the selected configuration file.
+    """
     if explicit is not None:
         return explicit.expanduser().resolve()
+
     configured = os.environ.get("PROMPTDECK_CONFIG")
-    return Path(configured).expanduser().resolve() if configured else config_dir() / "config.toml"
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    return config_dir() / "config.toml"
 
 
 def load_app_config(path: Path) -> AppConfig:
-    """Load app settings and the deck source they reference."""
+    """Load application settings and the referenced prompt decks.
+
+    A deck TOML file can be passed directly for ``--config`` compatibility.
+    Otherwise, ``path`` is treated as the application configuration and its
+    ``deck_source`` value is resolved relative to that file.
+
+    Parameters
+    ----------
+    path : Path
+        Application configuration or direct deck TOML file.
+
+    Returns
+    -------
+    AppConfig
+        Resolved paths, appearance settings, and loaded decks.
+
+    Raises
+    ------
+    DeckConfigError
+        If the configuration is missing, malformed, or contains unsupported
+        values.
+    """
     path = path.expanduser().resolve()
     data = _read_toml(path)
+
     # A direct deck file remains useful for --config and safe migration.
     if "decks" in data or "include" in data:
         return AppConfig(path, path, Appearance(), load_decks(path))
@@ -105,29 +190,42 @@ def load_app_config(path: Path) -> AppConfig:
     version = data.get("version", 1)
     if version != 1:
         raise DeckConfigError(f"Unsupported config version {version} in {path}")
+
     source_name = data.get("deck_source", "decks.toml")
-    if not isinstance(source_name, str) or not source_name.strip():
+    if not isinstance(source_name, str):
         raise DeckConfigError(f"'deck_source' must be non-empty text in {path}")
+
+    if not source_name.strip():
+        raise DeckConfigError(f"'deck_source' must be non-empty text in {path}")
+
     appearance_data = data.get("appearance", {})
     if not isinstance(appearance_data, dict):
         raise DeckConfigError(f"'appearance' must be a table in {path}")
+
     theme = appearance_data.get("theme", "system")
     if theme != "system":
         raise DeckConfigError("appearance.theme currently supports only 'system'")
-    colors = {key: appearance_data.get(key, "system") for key in APPEARANCE_COLOR_KEYS}
+
+    colors: dict[str, str] = {}
+    for key in APPEARANCE_COLOR_KEYS:
+        colors[key] = appearance_data.get(key, "system")
+
     if "selected_background" not in appearance_data:
         colors["selected_background"] = appearance_data.get("accent", "system")
+
     for key, value in colors.items():
         if not valid_color(value):
-            raise DeckConfigError(
-                f"appearance.{key} must be 'system' or #RRGGBB"
-            )
-    source = (path.parent / source_name).resolve()
+            raise DeckConfigError(f"appearance.{key} must be 'system' or #RRGGBB")
+
+    deck_source = (path.parent / source_name).resolve()
+    appearance = Appearance(**colors)
+    decks = load_decks(deck_source)
+
     return AppConfig(
-        path,
-        source,
-        Appearance(**colors),
-        load_decks(source),
+        path=path,
+        deck_source=deck_source,
+        appearance=appearance,
+        decks=decks,
     )
 
 
@@ -144,9 +242,14 @@ def valid_color(value: object) -> bool:
     bool
         ``True`` for ``system`` or a six-digit hex color.
     """
-    return isinstance(value, str) and (
-        value == "system" or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
-    )
+    if not isinstance(value, str):
+        return False
+
+    if value == "system":
+        return True
+
+    hex_color = re.fullmatch(r"#[0-9a-fA-F]{6}", value)
+    return hex_color is not None
 
 
 def valid_accent(value: object) -> bool:
@@ -178,10 +281,12 @@ def appearance_toml(appearance: Appearance) -> str:
     str
         Complete TOML ``appearance`` table with a trailing newline.
     """
-    lines = ["[appearance]"]
-    lines.extend(
-        f'{key} = "{getattr(appearance, key)}"' for key in APPEARANCE_COLOR_KEYS
-    )
+    lines: list[str] = ["[appearance]"]
+
+    for key in APPEARANCE_COLOR_KEYS:
+        value = getattr(appearance, key)
+        lines.append(f'{key} = "{value}"')
+
     return "\n".join(lines) + "\n"
 
 
