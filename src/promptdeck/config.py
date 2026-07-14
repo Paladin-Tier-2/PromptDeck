@@ -291,29 +291,78 @@ def appearance_toml(appearance: Appearance) -> str:
 
 
 def load_decks(source: Path) -> list[Deck]:
-    """Load and validate every deck reachable from *source*."""
+    """Load all prompt decks from a TOML source.
+
+    The loader starts at ``source`` and follows every TOML ``include`` pattern
+    recursively. Each deck and card is validated before it is converted into
+    a :class:`Deck` or :class:`Card` object.
+
+    Parameters
+    ----------
+    source : Path
+        Root TOML file containing decks or include patterns.
+
+    Returns
+    -------
+    list[Deck]
+        Flat list of decks from the root file and recursively included files.
+
+    Raises
+    ------
+    DeckConfigError
+        If a file is missing, malformed, or contains no usable decks.
+    """
     source = source.expanduser().resolve()
     if not source.is_file():
         raise DeckConfigError(f"Configuration not found: {source}")
 
-    decks = _load_recursive(source, visited=set())
+    def load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
+        """Load decks from one TOML file and its recursive includes.
+
+        Parameters
+        ----------
+        path : Path
+            TOML file currently being loaded.
+        visited : set[Path]
+            Resolved TOML paths that have already been loaded.
+
+        Returns
+        -------
+        list[Deck]
+            Decks parsed from ``path`` and its included TOML files.
+
+        Raises
+        ------
+        DeckConfigError
+            If the file or one of its deck definitions is invalid.
+        """
+        path = path.resolve()
+        if path in visited:
+            return []
+
+        visited.add(path)
+        data = _read_toml(path)
+
+        decks = _parse_decks(data.get("decks", []), path)
+        include_patterns = _include_patterns(data.get("include", []), path)
+
+        for pattern in include_patterns:
+            include_path = path.parent / pattern
+            matches = sorted(glob.glob(str(include_path)))
+
+            for match in matches:
+                match_path = Path(match)
+                included_decks = load_recursive(match_path, visited)
+                decks.extend(included_decks)
+
+        return decks
+
+    visited: set[Path] = set()
+    decks = load_recursive(source, visited)
+
     if not decks:
         raise DeckConfigError(f"No decks found in {source}")
-    return decks
 
-
-def _load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
-    path = path.resolve()
-    if path in visited:
-        return []
-    visited.add(path)
-
-    data = _read_toml(path)
-
-    decks = _parse_decks(data.get("decks", []), path)
-    for pattern in _include_patterns(data.get("include", []), path):
-        for match in sorted(glob.glob(str(path.parent / pattern))):
-            decks.extend(_load_recursive(Path(match), visited))
     return decks
 
 
