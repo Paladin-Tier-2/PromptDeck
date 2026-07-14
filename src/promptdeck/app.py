@@ -809,51 +809,71 @@ class PromptDeck(QWidget):
         painter : QPainter
             Painter used to draw on the overlay.
         """
-        width = max(280.0, min(680.0, self.width() * 0.45))
-        search = QRectF((self.width() - width) / 2, 8, width, 34)
+        requested_width = self.width() * 0.45
+        search_width = min(680.0, requested_width)
+        search_width = max(280.0, search_width)
+
+        search_left = (self.width() - search_width) / 2
+        search = QRectF(search_left, 8, search_width, 34)
+
         no_match = bool(self.deck_query) and self.matching_deck_index is None
-        border = (
-            self.theme.error
-            if no_match
-            else self.theme.alpha(self.theme.muted, 210)
-        )
-        painter.setPen(QPen(border, 2 if no_match else 1))
+        border = self.theme.alpha(self.theme.muted, 210)
+        border_width = 1
+
+        if no_match:
+            border = self.theme.error
+            border_width = 2
+
+        painter.setPen(QPen(border, border_width))
         painter.setBrush(self.theme.alpha(self.theme.card, 255))
         painter.drawRoundedRect(search, 10, 10)
+
         painter.setFont(QFont("Inter", 13, QFont.DemiBold))
-        painter.setPen(
-            self.theme.text
-            if self.deck_query
-            else self.theme.alpha(self.theme.body_text, 150)
-        )
-        search_text = self.deck_query if self.deck_query else "Find a deck..."
-        painter.drawText(search.adjusted(16, 0, -16, 0), Qt.AlignVCenter, search_text)
+
+        search_text = "Find a deck..."
+        search_text_color = self.theme.alpha(self.theme.body_text, 150)
+
+        if self.deck_query:
+            search_text = self.deck_query
+            search_text_color = self.theme.text
+
+        painter.setPen(search_text_color)
+        search_text_rect = search.adjusted(16, 0, -16, 0)
+        painter.drawText(search_text_rect, Qt.AlignVCenter, search_text)
 
         matches = self.matching_deck_indices
         if not matches:
             return
+
         row_height = 40.0
-        max_rows = max(1, min(8, int((self.height() - 64) / row_height)))
-        matches = matches[:max_rows]
+        available_rows = int((self.height() - 64) / row_height)
+        max_rows = min(8, available_rows)
+        max_rows = max(1, max_rows)
+        visible_matches = matches[:max_rows]
+
         panel = QRectF(
             search.left(),
             search.bottom() + 6,
             search.width(),
-            len(matches) * row_height + 8,
+            len(visible_matches) * row_height + 8,
         )
+
         painter.setPen(QPen(self.theme.alpha(self.theme.muted, 190), 1))
         painter.setBrush(self.theme.alpha(self.theme.card, 250))
         painter.drawRoundedRect(panel, 10, 10)
 
-        selected = matches[self.deck_result_index % len(matches)]
-        for position, deck_index in enumerate(matches):
+        selected_result = self.deck_result_index % len(matches)
+        selected_deck_index = matches[selected_result]
+
+        for position, deck_index in enumerate(visible_matches):
             row = QRectF(
                 panel.left() + 4,
                 panel.top() + 4 + position * row_height,
                 panel.width() - 8,
                 row_height,
             )
-            if deck_index == selected:
+
+            if deck_index == selected_deck_index:
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(self.theme.accent)
                 painter.drawRoundedRect(row, 7, 7)
@@ -862,14 +882,22 @@ class PromptDeck(QWidget):
                 text_color = self.theme.text
 
             deck = self.decks[deck_index]
+
             painter.setPen(text_color)
             painter.setFont(QFont("Inter", 12, QFont.DemiBold))
-            painter.drawText(row.adjusted(12, 0, -110, 0), Qt.AlignVCenter, deck.name)
+
+            name_rect = row.adjusted(12, 0, -110, 0)
+            painter.drawText(name_rect, Qt.AlignVCenter, deck.name)
+
             count = len(deck.cards)
-            label = f"{count} card" + ("" if count == 1 else "s")
+            label = f"{count} card"
+            if count != 1:
+                label += "s"
+
             painter.setFont(QFont("Inter", 10, QFont.DemiBold))
+            count_rect = row.adjusted(0, 0, -12, 0)
             painter.drawText(
-                row.adjusted(0, 0, -12, 0),
+                count_rect,
                 Qt.AlignVCenter | Qt.AlignRight,
                 label,
             )
@@ -884,9 +912,11 @@ class PromptDeck(QWidget):
         """
         count = len(self.deck.cards)
         columns, rows = self.grid_dimensions(count)
+
         margin_x = max(42, self.width() * 0.055)
         margin_y = max(42, self.height() * 0.075)
         gap = max(18, min(self.width(), self.height()) * 0.026)
+
         tile_w = (self.width() - margin_x * 2 - gap * (columns - 1)) / columns
         tile_h = (self.height() - margin_y * 2 - gap * (rows - 1)) / rows
 
@@ -895,7 +925,9 @@ class PromptDeck(QWidget):
             column = index % columns
             x = margin_x + column * (tile_w + gap)
             y = margin_y + row * (tile_h + gap)
-            self.draw_card(painter, index, QRectF(x, y, tile_w, tile_h))
+
+            card_rect = QRectF(x, y, tile_w, tile_h)
+            self.draw_card(painter, index, card_rect)
 
     def grid_dimensions(self, count: int) -> tuple[int, int]:
         """Calculate a grid size for a number of cards.
@@ -910,12 +942,18 @@ class PromptDeck(QWidget):
         tuple[int, int]
             Number of columns and rows.
         """
-        aspect = max(0.35, self.width() / max(1, self.height()))
-        columns = max(1, math.ceil(math.sqrt(count * aspect)))
+        height = max(1, self.height())
+        aspect = self.width() / height
+        aspect = max(0.35, aspect)
+
+        columns = math.ceil(math.sqrt(count * aspect))
+        columns = max(1, columns)
         rows = math.ceil(count / columns)
+
         while columns > 1 and (columns - 1) * rows >= count:
             columns -= 1
             rows = math.ceil(count / columns)
+
         return columns, rows
 
     def draw_card(self, painter: QPainter, index: int, rect: QRectF):
@@ -932,16 +970,26 @@ class PromptDeck(QWidget):
         """
         card = self.deck.cards[index]
         selected = self.selection_visible and index == self.card_index
-        scale = min(rect.width() / 360, rect.height() / 245)
+
+        horizontal_scale = rect.width() / 360
+        vertical_scale = rect.height() / 245
+        scale = min(horizontal_scale, vertical_scale)
+
         pad = 22 * scale
-        title_size = min(29, max(16, int(21 * scale)))
-        body_size = min(19, max(12, int(14 * scale)))
+        title_size = int(21 * scale)
+        title_size = max(16, title_size)
+        title_size = min(29, title_size)
+
+        body_size = int(14 * scale)
+        body_size = max(12, body_size)
+        body_size = min(19, body_size)
 
         if selected:
             fill = QLinearGradient(rect.topLeft(), rect.bottomRight())
             fill.setColorAt(0.0, self.theme.lighter(120))
             fill.setColorAt(0.52, self.theme.accent)
             fill.setColorAt(1.0, self.theme.darker(145))
+
             border = self.theme.selected_border
             title_color = self.theme.selected_text
             body_color = self.theme.alpha(self.theme.selected_text, 225)
@@ -956,55 +1004,81 @@ class PromptDeck(QWidget):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(-4, -4, 4, 4), 15, 15)
 
-        painter.setPen(QPen(border, 3 if selected else 1))
+        border_width = 1
+        if selected:
+            border_width = 3
+
+        painter.setPen(QPen(border, border_width))
         painter.setBrush(QBrush(fill))
         painter.drawRoundedRect(rect, 12, 12)
 
-        badge_text = str(index + 1 if index < 9 else 0)
+        badge_number = 0
+        if index < 9:
+            badge_number = index + 1
+
+        badge_text = str(badge_number)
         badge = QRectF(
-            rect.right() - 46 * scale, rect.top() + 16 * scale, 30 * scale, 26 * scale
+            rect.right() - 46 * scale,
+            rect.top() + 16 * scale,
+            30 * scale,
+            26 * scale,
         )
+
         painter.setPen(Qt.NoPen)
-        painter.setBrush(self.theme.darker(170) if selected else self.theme.muted)
+
+        badge_color = self.theme.muted
+        badge_text_color = self.theme.text
+        if selected:
+            badge_color = self.theme.darker(170)
+            badge_text_color = self.theme.selected_text
+
+        painter.setBrush(badge_color)
         painter.drawRoundedRect(badge, 7 * scale, 7 * scale)
-        painter.setPen(self.theme.selected_text if selected else self.theme.text)
-        painter.setFont(QFont("Inter", max(9, int(12 * scale)), QFont.Bold))
+
+        badge_font_size = max(9, int(12 * scale))
+        painter.setPen(badge_text_color)
+        painter.setFont(QFont("Inter", badge_font_size, QFont.Bold))
         painter.drawText(badge, Qt.AlignCenter, badge_text)
 
         title_font = QFont("Inter", title_size, QFont.DemiBold)
         painter.setPen(title_color)
         painter.setFont(title_font)
+
         title_rect = rect.adjusted(pad, 20 * scale, -58 * scale, 0)
         title_metrics = QFontMetrics(title_font)
+        title_height = title_metrics.lineSpacing() * 2
         title_lines = self.fit_lines(
             card.title,
             title_metrics,
             title_rect.width(),
-            title_metrics.lineSpacing() * 2,
+            title_height,
         )
         painter.drawText(title_rect, Qt.AlignTop, "\n".join(title_lines))
 
         preview = " ".join(card.body.split())
         body_font = QFont("Inter", body_size)
         body_metrics = QFontMetrics(body_font)
-        body_top = (
-            20 * scale + len(title_lines) * title_metrics.lineSpacing() + 16 * scale
-        )
+
+        title_block_height = len(title_lines) * title_metrics.lineSpacing()
+        body_top = 20 * scale + title_block_height + 16 * scale
         body_rect = rect.adjusted(pad, body_top, -pad, -20 * scale)
-        max_body_lines = 12 if selected else 10
-        wrapped = "\n".join(
-            self.fit_lines(
-                preview,
-                body_metrics,
-                body_rect.width(),
-                body_rect.height(),
-                max_lines=max_body_lines,
-            )
+
+        max_body_lines = 10
+        if selected:
+            max_body_lines = 12
+
+        body_lines = self.fit_lines(
+            preview,
+            body_metrics,
+            body_rect.width(),
+            body_rect.height(),
+            max_lines=max_body_lines,
         )
+        wrapped_body = "\n".join(body_lines)
 
         painter.setPen(body_color)
         painter.setFont(body_font)
-        painter.drawText(body_rect, Qt.AlignTop, wrapped)
+        painter.drawText(body_rect, Qt.AlignTop, wrapped_body)
 
     def fit_lines(
         self,
@@ -1026,7 +1100,7 @@ class PromptDeck(QWidget):
             Maximum line width in pixels.
         height : float
             Maximum text block height in pixels.
-        max_lines : int | None
+        max_lines : int or None, optional
             Optional cap on the number of returned lines.
 
         Returns
@@ -1034,31 +1108,57 @@ class PromptDeck(QWidget):
         list[str]
             Wrapped lines, elided when needed to fit the available space.
         """
-        available_lines = max(1, int(height // metrics.lineSpacing()))
-        max_lines = (
-            available_lines if max_lines is None else min(max_lines, available_lines)
-        )
-        lines = []
+        line_spacing = metrics.lineSpacing()
+        available_lines = int(height // line_spacing)
+        available_lines = max(1, available_lines)
 
-        for paragraph in text.splitlines() or [text]:
+        line_limit = available_lines
+        if max_lines is not None:
+            line_limit = min(max_lines, available_lines)
+
+        lines: list[str] = []
+        paragraphs = text.splitlines()
+        if not paragraphs:
+            paragraphs = [text]
+
+        for paragraph in paragraphs:
             current = ""
+
             for word in paragraph.split():
                 candidate = f"{current} {word}".strip()
+
                 if metrics.horizontalAdvance(candidate) <= width:
                     current = candidate
                     continue
+
                 if current:
                     lines.append(current)
                     current = word
                 else:
-                    lines.append(metrics.elidedText(word, Qt.ElideRight, int(width)))
-                if len(lines) == max_lines:
-                    lines[-1] = metrics.elidedText(lines[-1], Qt.ElideRight, int(width))
+                    elided_word = metrics.elidedText(
+                        word,
+                        Qt.ElideRight,
+                        int(width),
+                    )
+                    lines.append(elided_word)
+
+                if len(lines) == line_limit:
+                    lines[-1] = metrics.elidedText(
+                        lines[-1],
+                        Qt.ElideRight,
+                        int(width),
+                    )
                     return lines
+
             if current:
                 lines.append(current)
-                if len(lines) == max_lines:
-                    lines[-1] = metrics.elidedText(lines[-1], Qt.ElideRight, int(width))
+
+                if len(lines) == line_limit:
+                    lines[-1] = metrics.elidedText(
+                        lines[-1],
+                        Qt.ElideRight,
+                        int(width),
+                    )
                     return lines
 
         return lines
