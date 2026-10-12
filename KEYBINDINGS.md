@@ -2,22 +2,30 @@
 
 ## Cards
 
-| Key | Action |
-| --- | --- |
-| Arrow keys or `H/J/K/L` | Move between cards |
-| `1`–`9`, `0` | Select a card directly |
-| A card's configured key | Select that card |
-| `Enter` or `Space` | Copy the selected prompt and close |
-| `Tab` / `Shift+Tab` | Open the next / previous deck |
-| `/` | Find a deck by name |
-| `Esc` or `Backspace` | Close PromptDeck |
-
-## Deck finder
+Select a card, then press `Enter` to copy its text and close the menu.
 
 | Key | Action |
 | --- | --- |
-| Type | Preview the first alphabetical deck starting with the query |
-| `↑` / `↓` | Move through suggestions and preview each deck |
-| `Enter` | Keep the previewed deck |
-| `Backspace` | Delete one character; close when the query is empty |
-| `Esc` | Restore the deck and card shown before searching |
+| Arrow keys | Move between cards |
+| `H` / `J` / `K` / `L` | Move left / down / up / right |
+| `1`–`9` | Select card 1–9 |
+| `0` | Select card 10 |
+| A card's shortcut key or first letter of its title | Select a matching card; press again for the next match |
+| `Enter` or `Space` | Copy the selected card and close the menu |
+| `Tab` | Next deck |
+| `Shift+Tab` | Previous deck |
+| `/` | Open deck search |
+| `Esc` or `Backspace` | Close the menu without copying |
+
+## Deck search
+
+Press `/`, then type the start of a deck name.
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` | Preview the previous / next match |
+| `Enter` | Choose the previewed deck and leave search |
+| `Backspace` | Delete a letter; close search if it was already empty |
+| `Esc` | Cancel search and return to the original deck and card |
+
+After choosing a deck, use the card controls above.

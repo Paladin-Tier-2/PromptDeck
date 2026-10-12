@@ -1,56 +1,97 @@
+<p align="center">
+  <img src="assets/banner.png" alt="PromptDeck" width="100%">
+</p>
+
 # PromptDeck
 
-PromptDeck is a small keyboard-first prompt picker. It opens over the current screen, copies a saved prompt, and gets out of the way. Its colors follow the desktop's Qt palette by default and can be changed in setup or `config.toml`.
+PromptDeck puts saved prompts in a window over whatever you're working on; press your shortcut, pick one with the keyboard and then press `Enter`. The window will close with the text copied to your clipboard.
+
+It works well for me when I need to reuse prompts with a chatbot or when I need to fetch personal details very quickly , granted that can be done with any simple script but having it multiple groups of information grouped in one place and only one keystroke away might also be very handy for you.
 
 ## Install
 
 PromptDeck requires Python 3.10 or newer.
 
-```bash
-pip install promptdeck-qt
-promptdeck setup
-```
-
-Setup has separate prompt and appearance pages. The appearance page shows the real overlay and updates it while you choose colors. Use `promptdeck setup --terminal` if you prefer terminal prompts, or `--yes` for unattended setup.
-
-The isolated Linux installer keeps the application out of your project folders:
+### Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.sh | sh
 ```
 
-On Windows, download and run the installer:
+### Windows
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/Paladin-Tier-2/PromptDeck/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Re-running either installer upgrades the package without overwriting your configuration or prompts. Windows autostart is intentionally not installed in v0.1.
+Rerunning either installer will update the tool.
+
+The setup script lets you test a on a window where you can see how it will look.
+To run setup again, use `promptdeck setup` or `promptdeck setup --terminal` , the fag `--yes` is also available. 
 
 ## Use
+First, set up a global shortcut in your desktop setting (KDE,GNOME, or Windows), bind any you want to run `promptdeck`. It should work since it is will be available in your `PATH`.
+
+On Linux, the setup installs a daemon `promptdeck.service` so the window pops up with less delay.
 
 ```bash
-promptdeck
-promptdeck daemon
-promptdeck service start
-promptdeck service stop
-promptdeck service restart
 promptdeck service status
+promptdeck service restart 
 ```
 
-On Linux, `promptdeck setup` installs and starts `promptdeck.service`, a systemd **user** service. Plain `promptdeck` asks that warm daemon to show the overlay. If the daemon is stopped, it opens a one-shot process instead.
+```bash
+promptdeck                 # Open the overlay
+promptdeck daemon          # Run daemon in terminal
+promptdeck service restart # Restart background service
+promptdeck service status  # Check service status
+```
 
-See [keyboard controls](KEYBINDINGS.md) for card navigation and the deck finder.
+See [keyboard controls](KEYBINDINGS.md) for navigation.
 
-## Configuration
+## Your prompts (`decks.toml`)
 
-Setup stores private files outside the repository:
+Config lives in 
 
-- Linux: `${XDG_CONFIG_HOME:-~/.config}/promptdeck`
+- Linux: `~/.config/promptdeck` (`$XDG_CONFIG_HOME/promptdeck`)
 - Windows: `%APPDATA%\PromptDeck`
 
-`config.toml`:
+The text prompt lives in `decks.toml`, the deck refers to a group of cards ( the prompts); each prompt has a title, shortcut, and the text.
+
+Example:
+
+```toml
+[[decks]]
+name = "Writing"
+
+[[decks.cards]]
+title = "Make concise"
+key = "C"
+body = "Make this shorter without changing its meaning."
+```
+
+To separate your prompts, you can put this in `decks.toml`:
+
+```toml
+include = ["decks/*.toml"]
+```
+
+```text
+~/.config/promptdeck/
+├── config.toml
+├── decks.toml
+└── decks/
+    ├── 00-ai.toml
+    ├── 10-writing.toml
+    ├── 20-coding.toml
+    └── 30-physics.toml
+```
+
+Put your deck definitions in the files under `decks/`. Please use the same structure format as the example above. Files load alphabetically, so numbering controls deck order. You don't need to restart the service to see any edits you make.
+
+## Appearance (`config.toml`)
+
+Default color is based on the desktop's Qt palette. Change them in setup or edit `config.toml`. Use `"system"` for a desktop color or whatever you want in hex notation:
 
 ```toml
 version = 1
@@ -64,32 +105,8 @@ card_border = "system"
 card_text = "system"
 ```
 
-Selected-card text is automatic: black on light selected backgrounds and white on
-dark selected backgrounds.
-
-Each deck has a name and cards:
-
-```toml
-[[decks]]
-name = "Writing"
-
-[[decks.cards]]
-title = "Make concise"
-key = "C"
-body = "Make this shorter without changing its meaning."
-```
-
-Split larger collections with `include = ["decks/*.toml"]`. PromptDeck reloads the config, included decks, and colors whenever the overlay opens.
-
-Config precedence is `--config`, then `PROMPTDECK_CONFIG`, then the native default. `--config` may point to either `config.toml` or a deck file.
-
-Existing PromptDeck installations are detected automatically. Migration copies prompt files into the native config directory; it never moves, deletes, or overwrites the originals. For unattended setup:
-
-```bash
-promptdeck setup --yes --accent system
-promptdeck setup --yes --migrate /path/to/decks.toml
-promptdeck setup --yes --no-service
-```
+## More
+You can pass a custom config anytime with `promptdeck --config /path/to/config.toml`
 
 ## Development
 
@@ -98,5 +115,3 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 python -m build
 ```
-
-The GitHub Actions test matrix covers Linux and Windows and verifies a clean wheel install.
