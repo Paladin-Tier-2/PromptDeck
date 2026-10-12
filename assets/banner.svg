@@ -38,8 +38,8 @@
     <text x="0" y="45" fill="#ffffff" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="58" font-weight="900" letter-spacing="-1.5">PromptDeck</text>
 
     <!-- Subtitle / Tagline -->
-    <text x="0" y="96" fill="#cbd5e1" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">A keyboard-first prompt picker for Linux &amp; Windows.</text>
-    <text x="0" y="130" fill="#64748b" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="16" font-weight="400">Opens instantly over your screen, copies a prompt, and vanishes.</text>
+    <text x="0" y="96" fill="#cbd5e1" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">A keyboard-first prompt picker.</text>
+    <text x="0" y="130" fill="#64748b" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="16" font-weight="400">Linux &amp; Windows. Pick a card, copy, paste.</text>
   </g>
 
   <!-- ==================== RIGHT SIDE: THE AUTHENTIC 4-CARD UI GRID ==================== -->
