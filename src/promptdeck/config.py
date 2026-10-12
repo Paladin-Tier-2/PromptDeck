@@ -4,10 +4,12 @@ import glob
 import os
 import re
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,12 +17,20 @@ from pathlib import Path
 class DeckConfigError(ValueError):
     """Raised when a settings or deck file is missing or invalid."""
 
-    pass
-
 
 @dataclass(frozen=True)
 class Card:
-    """One selectable prompt card."""
+    """One selectable prompt card.
+
+    Attributes
+    ----------
+    title : str
+        Short title displayed at the top of the card.
+    body : str
+        Prompt copied to the clipboard when the card is selected.
+    key : str
+        Optional keyboard shortcut shown on the card.
+    """
 
     title: str
     body: str
@@ -29,7 +39,15 @@ class Card:
 
 @dataclass(frozen=True)
 class Deck:
-    """A named collection of prompt cards."""
+    """A named collection of prompt cards.
+
+    Attributes
+    ----------
+    name : str
+        Deck name shown in the overlay header and deck finder.
+    cards : list[Card]
+        Cards displayed when this deck is active.
+    """
 
     name: str
     cards: list[Card]
@@ -71,7 +89,19 @@ APPEARANCE_COLOR_KEYS = (
 
 @dataclass(frozen=True)
 class AppConfig:
-    """Resolved settings, source paths, appearance, and decks."""
+    """Resolved PromptDeck configuration.
+
+    Attributes
+    ----------
+    path : Path
+        Path to the loaded application configuration.
+    deck_source : Path
+        Root TOML file containing decks or include patterns.
+    appearance : Appearance
+        Resolved appearance settings.
+    decks : list[Deck]
+        All decks loaded from ``deck_source``.
+    """
 
     path: Path
     deck_source: Path
@@ -80,24 +110,79 @@ class AppConfig:
 
 
 def config_dir() -> Path:
-    """Return the native per-user PromptDeck config directory."""
+    """Return the native per-user PromptDeck config directory.
+
+    Returns
+    -------
+    Path
+        ``%APPDATA%/PromptDeck`` on Windows or the XDG config directory on
+        other platforms.
+    """
     if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "PromptDeck"
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "promptdeck"
+        app_data = os.environ.get(
+            "APPDATA",
+            Path.home() / "AppData" / "Roaming",
+        )
+        return Path(app_data) / "PromptDeck"
+
+    config_home = os.environ.get(
+        "XDG_CONFIG_HOME",
+        Path.home() / ".config",
+    )
+    return Path(config_home) / "promptdeck"
 
 
 def config_path(explicit: Path | None = None) -> Path:
-    """Resolve config precedence: argument, environment, then native default."""
+    """Resolve the application configuration path.
+
+    Parameters
+    ----------
+    explicit : Path or None, optional
+        Path supplied with ``--config``. When omitted, the
+        ``PROMPTDECK_CONFIG`` environment variable and native default are
+        checked in that order.
+
+    Returns
+    -------
+    Path
+        Absolute path to the selected configuration file.
+    """
     if explicit is not None:
         return explicit.expanduser().resolve()
+
     configured = os.environ.get("PROMPTDECK_CONFIG")
-    return Path(configured).expanduser().resolve() if configured else config_dir() / "config.toml"
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    return config_dir() / "config.toml"
 
 
 def load_app_config(path: Path) -> AppConfig:
-    """Load app settings and the deck source they reference."""
+    """Load application settings and the referenced prompt decks.
+
+    A deck TOML file can be passed directly for ``--config`` compatibility.
+    Otherwise, ``path`` is treated as the application configuration and its
+    ``deck_source`` value is resolved relative to that file.
+
+    Parameters
+    ----------
+    path : Path
+        Application configuration or direct deck TOML file.
+
+    Returns
+    -------
+    AppConfig
+        Resolved paths, appearance settings, and loaded decks.
+
+    Raises
+    ------
+    DeckConfigError
+        If the configuration is missing, malformed, or contains unsupported
+        values.
+    """
     path = path.expanduser().resolve()
     data = _read_toml(path)
+
     # A direct deck file remains useful for --config and safe migration.
     if "decks" in data or "include" in data:
         return AppConfig(path, path, Appearance(), load_decks(path))
@@ -105,29 +190,42 @@ def load_app_config(path: Path) -> AppConfig:
     version = data.get("version", 1)
     if version != 1:
         raise DeckConfigError(f"Unsupported config version {version} in {path}")
+
     source_name = data.get("deck_source", "decks.toml")
-    if not isinstance(source_name, str) or not source_name.strip():
+    if not isinstance(source_name, str):
         raise DeckConfigError(f"'deck_source' must be non-empty text in {path}")
+
+    if not source_name.strip():
+        raise DeckConfigError(f"'deck_source' must be non-empty text in {path}")
+
     appearance_data = data.get("appearance", {})
     if not isinstance(appearance_data, dict):
         raise DeckConfigError(f"'appearance' must be a table in {path}")
+
     theme = appearance_data.get("theme", "system")
     if theme != "system":
         raise DeckConfigError("appearance.theme currently supports only 'system'")
-    colors = {key: appearance_data.get(key, "system") for key in APPEARANCE_COLOR_KEYS}
+
+    colors: dict[str, str] = {}
+    for key in APPEARANCE_COLOR_KEYS:
+        colors[key] = appearance_data.get(key, "system")
+
     if "selected_background" not in appearance_data:
         colors["selected_background"] = appearance_data.get("accent", "system")
+
     for key, value in colors.items():
         if not valid_color(value):
-            raise DeckConfigError(
-                f"appearance.{key} must be 'system' or #RRGGBB"
-            )
-    source = (path.parent / source_name).resolve()
+            raise DeckConfigError(f"appearance.{key} must be 'system' or #RRGGBB")
+
+    deck_source = (path.parent / source_name).resolve()
+    appearance = Appearance(**colors)
+    decks = load_decks(deck_source)
+
     return AppConfig(
-        path,
-        source,
-        Appearance(**colors),
-        load_decks(source),
+        path=path,
+        deck_source=deck_source,
+        appearance=appearance,
+        decks=decks,
     )
 
 
@@ -144,9 +242,14 @@ def valid_color(value: object) -> bool:
     bool
         ``True`` for ``system`` or a six-digit hex color.
     """
-    return isinstance(value, str) and (
-        value == "system" or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
-    )
+    if not isinstance(value, str):
+        return False
+
+    if value == "system":
+        return True
+
+    hex_color = re.fullmatch(r"#[0-9a-fA-F]{6}", value)
+    return hex_color is not None
 
 
 def valid_accent(value: object) -> bool:
@@ -178,43 +281,112 @@ def appearance_toml(appearance: Appearance) -> str:
     str
         Complete TOML ``appearance`` table with a trailing newline.
     """
-    lines = ["[appearance]"]
-    lines.extend(
-        f'{key} = "{getattr(appearance, key)}"' for key in APPEARANCE_COLOR_KEYS
-    )
+    lines: list[str] = ["[appearance]"]
+
+    for key in APPEARANCE_COLOR_KEYS:
+        value = getattr(appearance, key)
+        lines.append(f'{key} = "{value}"')
+
     return "\n".join(lines) + "\n"
 
 
 def load_decks(source: Path) -> list[Deck]:
-    """Load and validate every deck reachable from *source*."""
+    """Load all prompt decks from a TOML source.
+
+    The loader starts at ``source`` and follows every TOML ``include`` pattern
+    recursively. Each deck and card is validated before it is converted into
+    a :class:`Deck` or :class:`Card` object.
+
+    Parameters
+    ----------
+    source : Path
+        Root TOML file containing decks or include patterns.
+
+    Returns
+    -------
+    list[Deck]
+        Flat list of decks from the root file and recursively included files.
+
+    Raises
+    ------
+    DeckConfigError
+        If a file is missing, malformed, or contains no usable decks.
+    """
     source = source.expanduser().resolve()
     if not source.is_file():
         raise DeckConfigError(f"Configuration not found: {source}")
 
-    decks = _load_recursive(source, visited=set())
+    def load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
+        """Load decks from one TOML file and its recursive includes.
+
+        Parameters
+        ----------
+        path : Path
+            TOML file currently being loaded.
+        visited : set[Path]
+            Resolved TOML paths that have already been loaded.
+
+        Returns
+        -------
+        list[Deck]
+            Decks parsed from ``path`` and its included TOML files.
+
+        Raises
+        ------
+        DeckConfigError
+            If the file or one of its deck definitions is invalid.
+        """
+        path = path.resolve()
+        if path in visited:
+            return []
+
+        visited.add(path)
+        data = _read_toml(path)
+
+        decks = _parse_decks(data.get("decks", []), path)
+        include_patterns = _include_patterns(data.get("include", []), path)
+
+        for pattern in include_patterns:
+            include_path = path.parent / pattern
+            matches = sorted(glob.glob(str(include_path)))
+
+            for match in matches:
+                match_path = Path(match)
+                included_decks = load_recursive(match_path, visited)
+                decks.extend(included_decks)
+
+        return decks
+
+    visited: set[Path] = set()
+    decks = load_recursive(source, visited)
+
     if not decks:
         raise DeckConfigError(f"No decks found in {source}")
-    return decks
 
-
-def _load_recursive(path: Path, visited: set[Path]) -> list[Deck]:
-    path = path.resolve()
-    if path in visited:
-        return []
-    visited.add(path)
-
-    data = _read_toml(path)
-
-    decks = _parse_decks(data.get("decks", []), path)
-    for pattern in _include_patterns(data.get("include", []), path):
-        for match in sorted(glob.glob(str(path.parent / pattern))):
-            decks.extend(_load_recursive(Path(match), visited))
     return decks
 
 
 def _read_toml(path: Path) -> dict:
+    """Read one TOML file with a configuration-specific error message.
+
+    Parameters
+    ----------
+    path : Path
+        TOML file to read.
+
+    Returns
+    -------
+    dict
+        Parsed TOML data.
+
+    Raises
+    ------
+    DeckConfigError
+        If ``path`` is missing, unreadable, or invalid TOML.
+    """
     if not path.is_file():
         raise DeckConfigError(f"Configuration not found: {path}")
+
     try:
         with path.open("rb") as source:
             return tomllib.load(source)
@@ -223,48 +395,143 @@ def _read_toml(path: Path) -> dict:
 
 
 def _parse_decks(raw_decks: object, path: Path) -> list[Deck]:
+    """Validate raw deck tables and convert them into deck objects.
+
+    Parameters
+    ----------
+    raw_decks : object
+        Value read from the TOML ``decks`` key.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    list[Deck]
+        Validated deck objects in source order.
+
+    Raises
+    ------
+    DeckConfigError
+        If a deck or card has an invalid shape or required value.
+    """
     if not isinstance(raw_decks, list):
         raise DeckConfigError(f"'decks' must be a list in {path}")
 
-    decks = []
-    for deck_index, raw_deck in enumerate(raw_decks, start=1):
-        if not isinstance(raw_deck, dict):
+    decks: list[Deck] = []
+    for deck_index, deck_data in enumerate(raw_decks, start=1):
+        if not isinstance(deck_data, dict):
             raise DeckConfigError(f"Deck {deck_index} must be a table in {path}")
 
-        name = _required_text(raw_deck, "name", f"deck {deck_index}", path)
-        raw_cards = raw_deck.get("cards", [])
-        if not isinstance(raw_cards, list) or not raw_cards:
-            raise DeckConfigError(f"Deck '{name}' needs at least one card in {path}")
+        deck_name = _required_text(
+            deck_data,
+            "name",
+            f"deck {deck_index}",
+            path,
+        )
+        card_data_list = deck_data.get("cards", [])
 
-        cards = []
-        for card_index, raw_card in enumerate(raw_cards, start=1):
-            if not isinstance(raw_card, dict):
+        if not isinstance(card_data_list, list):
+            message = f"'cards' must be a list for deck '{deck_name}' in {path}"
+            raise DeckConfigError(message)
+
+        if not card_data_list:
+            raise DeckConfigError(
+                f"Deck '{deck_name}' needs at least one card in {path}"
+            )
+
+        cards: list[Card] = []
+        for card_index, card_data in enumerate(card_data_list, start=1):
+            if not isinstance(card_data, dict):
                 raise DeckConfigError(
-                    f"Card {card_index} in deck '{name}' must be a table in {path}"
+                    f"Card {card_index} in deck '{deck_name}' must be a table in {path}"
                 )
-            context = f"card {card_index} in deck '{name}'"
-            title = _required_text(raw_card, "title", context, path)
-            body = _required_text(raw_card, "body", context, path) + "\n"
-            key = raw_card.get("key", "")
+
+            context = f"card {card_index} in deck '{deck_name}'"
+            title = _required_text(card_data, "title", context, path)
+            body = _required_text(card_data, "body", context, path) + "\n"
+            key = card_data.get("key", "")
+
             if not isinstance(key, str):
                 raise DeckConfigError(f"'key' must be text for {context} in {path}")
-            cards.append(Card(title=title, body=body, key=key.strip()))
 
-        decks.append(Deck(name=name, cards=cards))
+            card = Card(
+                title=title,
+                body=body,
+                key=key.strip(),
+            )
+            cards.append(card)
+
+        deck = Deck(
+            name=deck_name,
+            cards=cards,
+        )
+        decks.append(deck)
+
     return decks
 
 
 def _required_text(data: dict, field: str, context: str, path: Path) -> str:
+    """Read and normalize one required text field.
+
+    Parameters
+    ----------
+    data : dict
+        TOML table containing the field.
+    field : str
+        Field name to read.
+    context : str
+        Human-readable deck or card description for errors.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    str
+        Stripped non-empty field value.
+
+    Raises
+    ------
+    DeckConfigError
+        If the field is missing, not text, or empty.
+    """
     value = data.get(field)
-    if not isinstance(value, str) or not value.strip():
+
+    if not isinstance(value, str):
         message = f"'{field}' must be non-empty text for {context} in {path}"
         raise DeckConfigError(message)
+
+    if not value.strip():
+        message = f"'{field}' must be non-empty text for {context} in {path}"
+        raise DeckConfigError(message)
+
     return value.strip()
 
 
 def _include_patterns(raw_patterns: object, path: Path) -> list[str]:
-    if not isinstance(raw_patterns, list) or not all(
-        isinstance(pattern, str) for pattern in raw_patterns
-    ):
+    """Validate include patterns from one TOML file.
+
+    Parameters
+    ----------
+    raw_patterns : object
+        Value read from the TOML ``include`` key.
+    path : Path
+        Source file used in validation errors.
+
+    Returns
+    -------
+    list[str]
+        Include patterns in source order.
+
+    Raises
+    ------
+    DeckConfigError
+        If the value is not a list of strings.
+    """
+    if not isinstance(raw_patterns, list):
         raise DeckConfigError(f"'include' must be a list of paths in {path}")
+
+    for pattern in raw_patterns:
+        if not isinstance(pattern, str):
+            raise DeckConfigError(f"'include' must be a list of paths in {path}")
+
     return raw_patterns

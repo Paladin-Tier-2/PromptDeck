@@ -1,6 +1,7 @@
 """Native first-run setup window for PromptDeck."""
 
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
@@ -121,17 +122,29 @@ class SetupDialog(QDialog):
         self.toml.setLineWrapMode(QPlainTextEdit.NoWrap)
 
         preview_config = AppConfig(
-            Path(),
-            Path(),
-            appearance,
-            [
+            path=Path(),
+            deck_source=Path(),
+            appearance=appearance,
+            decks=[
                 Deck(
-                    "Preview",
-                    [
-                        Card("Selected prompt", "The selected colors change here.\n"),
-                        Card("Another prompt", "The card colors change here.\n"),
-                        Card("Keyboard first", "Use arrows or H/J/K/L to move.\n"),
-                        Card("Copy and close", "Press Enter to copy the prompt.\n"),
+                    name="Preview",
+                    cards=[
+                        Card(
+                            title="Selected prompt",
+                            body="The selected colors change here.\n",
+                        ),
+                        Card(
+                            title="Another prompt",
+                            body="The card colors change here.\n",
+                        ),
+                        Card(
+                            title="Keyboard first",
+                            body="Use arrows or H/J/K/L to move.\n",
+                        ),
+                        Card(
+                            title="Copy and close",
+                            body="Press Enter to copy the prompt.\n",
+                        ),
                     ],
                 )
             ],
@@ -150,8 +163,8 @@ class SetupDialog(QDialog):
         cancel_button = QPushButton("Cancel")
         self.next_button.setObjectName("primaryButton")
         self.finish_button.setObjectName("primaryButton")
-        self.back_button.clicked.connect(lambda: self.show_page(0))
-        self.next_button.clicked.connect(lambda: self.show_page(1))
+        self.back_button.clicked.connect(partial(self.show_page, 0))
+        self.next_button.clicked.connect(partial(self.show_page, 1))
         self.finish_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
 
@@ -185,18 +198,22 @@ class SetupDialog(QDialog):
         layout = QVBoxLayout(content)
         layout.setSpacing(14)
         layout.addWidget(self.heading("Set up PromptDeck"))
+
         intro = QLabel("Choose where PromptDeck gets its prompts.")
         intro.setWordWrap(True)
         layout.addWidget(intro)
+
         layout.addWidget(self.rule())
         layout.addWidget(self.migrate)
         layout.addWidget(self.sample)
         layout.addWidget(self.source_button, alignment=Qt.AlignLeft)
+
         privacy = QLabel(
             "Your prompts stay in your PromptDeck config folder and are never uploaded."
         )
         privacy.setWordWrap(True)
         layout.addWidget(privacy)
+
         layout.addSpacing(10)
         controls = QLabel("Tab cycles decks  ·  / finds a deck  ·  Enter copies")
         controls.setStyleSheet("font-family: monospace; color: palette(mid)")
@@ -235,30 +252,35 @@ class SetupDialog(QDialog):
 
         for key in APPEARANCE_COLOR_KEYS:
             row = QHBoxLayout()
+
             labels = QVBoxLayout()
             labels.setSpacing(0)
+
             title = QLabel(self.COLOR_LABELS[key])
             title.setStyleSheet("font-weight: 600")
+
             config_key = QLabel(key)
             config_key.setStyleSheet("font-family: monospace; color: palette(mid)")
+
             labels.addWidget(title)
             labels.addWidget(config_key)
+
             color_button = QPushButton()
             color_button.setObjectName("colorField")
-            color_button.clicked.connect(
-                lambda checked=False, name=key: self.choose_color(name)
-            )
+            color_button.clicked.connect(partial(self.choose_color, key))
+
             reset_button = QPushButton("Reset")
             reset_button.setObjectName("resetLink")
-            reset_button.clicked.connect(
-                lambda checked=False, name=key: self.use_system_color(name)
-            )
+            reset_button.clicked.connect(partial(self.use_system_color, key))
+
             self.color_buttons[key] = color_button
             self.reset_buttons[key] = reset_button
+
             row.addLayout(labels, 1)
             row.addWidget(color_button)
             row.addWidget(reset_button)
             settings_layout.addLayout(row)
+
             if key == "selected_border":
                 note = QLabel(
                     "Selected text is automatic: black on light backgrounds, "
@@ -330,16 +352,22 @@ class SetupDialog(QDialog):
 
     def choose_source(self) -> None:
         """Open a file dialog for an existing root deck file."""
+        starting_directory = Path.home()
+        if self.source is not None:
+            starting_directory = self.source.parent
+
         selected, _ = QFileDialog.getOpenFileName(
             self,
             "Choose an existing deck file",
-            str(self.source.parent if self.source else Path.home()),
+            str(starting_directory),
             "TOML files (*.toml)",
         )
-        if selected:
-            self.source = Path(selected).resolve()
-            self.migrate.setChecked(True)
-            self.update_source()
+        if not selected:
+            return
+
+        self.source = Path(selected).resolve()
+        self.migrate.setChecked(True)
+        self.update_source()
 
     def update_source(self) -> None:
         """Update migration text and visibility for the selected source."""
@@ -364,19 +392,22 @@ class SetupDialog(QDialog):
         """
         previous = self.appearance
         value = getattr(previous, key)
-        initial = (
-            self.palette().color(self.COLOR_ROLES[key])
-            if value == "system"
-            else QColor(value)
-        )
+
+        if value == "system":
+            initial = self.palette().color(self.COLOR_ROLES[key])
+        else:
+            initial = QColor(value)
+
         dialog = QColorDialog(initial, self)
         dialog.setWindowTitle(key)
-        dialog.currentColorChanged.connect(
-            lambda color: self.preview_color(key, color)
-        )
-        if dialog.exec() != QDialog.Accepted:
-            self.appearance = previous
-            self.update_preview()
+        dialog.currentColorChanged.connect(partial(self.preview_color, key))
+
+        result = dialog.exec()
+        if result == QDialog.Accepted:
+            return
+
+        self.appearance = previous
+        self.update_preview()
 
     def preview_color(self, key: str, color: QColor) -> None:
         """Apply a picker color to the config and overlay preview.
@@ -388,9 +419,12 @@ class SetupDialog(QDialog):
         color : QColor
             Current color emitted by the open picker.
         """
-        if color.isValid():
-            self.appearance = replace(self.appearance, **{key: color.name()})
-            self.update_preview()
+        if not color.isValid():
+            return
+
+        color_value = color.name()
+        self.appearance = replace(self.appearance, **{key: color_value})
+        self.update_preview()
 
     def use_system_color(self, key: str) -> None:
         """Reset one setting to the desktop palette.
@@ -408,19 +442,26 @@ class SetupDialog(QDialog):
         self.preview.set_appearance(self.appearance)
         self.preview.selection_visible = True
         self.toml.setPlainText(appearance_toml(self.appearance))
+
         for key, button in self.color_buttons.items():
             value = getattr(self.appearance, key)
-            color = (
-                self.palette().color(self.COLOR_ROLES[key])
-                if value == "system"
-                else QColor(value)
-            )
+
+            if value == "system":
+                color = self.palette().color(self.COLOR_ROLES[key])
+                label = "System"
+            else:
+                color = QColor(value)
+                label = value.upper()
+
             swatch = QPixmap(14, 14)
             swatch.fill(color)
+
             button.setIcon(QIcon(swatch))
             button.setIconSize(QSize(14, 14))
-            button.setText("System" if value == "system" else value.upper())
+            button.setText(label)
+
             self.reset_buttons[key].setVisible(value != "system")
+
         self.preview.update()
 
     def choices(self) -> SetupChoices:
@@ -431,5 +472,13 @@ class SetupDialog(QDialog):
         SetupChoices
             Prompt source, appearance, and autostart choices.
         """
-        source = self.source if self.migrate.isChecked() else None
-        return SetupChoices(source, self.appearance, self.service.isChecked())
+        source = None
+        if self.migrate.isChecked():
+            source = self.source
+
+        install_service = self.service.isChecked()
+        return SetupChoices(
+            source=source,
+            appearance=self.appearance,
+            install_service=install_service,
+        )
