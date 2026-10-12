@@ -8,6 +8,9 @@ PromptDeck puts saved prompts in a window over whatever you're working on; press
 
 It works well for me when I need to reuse prompts with a chatbot or when I need to fetch personal details very quickly , granted that can be done with any simple script but having it multiple groups of information grouped in one place and only one keystroke away might also be very handy for you.
 
+Demo:
+https://github.com/user-attachments/assets/04bb1d76-82a7-4a04-bec7-3309483e1920
+
 ## Install
 
 PromptDeck requires Python 3.10 or newer.
