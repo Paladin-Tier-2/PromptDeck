@@ -12,6 +12,7 @@ dist/
 # Local development notes.
 /Handover/
 .playwright-mcp/
+/docs/
 
 # Editor and operating-system files.
 .idea/
