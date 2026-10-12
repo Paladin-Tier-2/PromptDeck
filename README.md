@@ -27,8 +27,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 Rerunning either installer will update the tool.
 
-The setup script lets you test a on a window where you can see how it will look.
-To run setup again, use `promptdeck setup` or `promptdeck setup --terminal` , the fag `--yes` is also available. 
+The setup script lets you test it in a preview window to see how it looks.
+To run setup again, use `promptdeck setup` or `promptdeck setup --terminal` (the flag `--yes` is also available). 
 
 ## Use
 First, set up a global shortcut in your desktop setting (KDE,GNOME, or Windows), bind any you want to run `promptdeck`. It should work since it is will be available in your `PATH`.
@@ -70,10 +70,13 @@ key = "C"
 body = "Make this shorter without changing its meaning."
 ```
 
-To separate your prompts, you can put this in `decks.toml`:
+To organize prompts across multiple files and subdirectories, you can glob them in `decks.toml`:
 
 ```toml
-include = ["decks/*.toml"]
+include = [
+    "decks/*.toml",
+    "decks/*/*.toml"
+]
 ```
 
 ```text
@@ -82,12 +85,12 @@ include = ["decks/*.toml"]
 ├── decks.toml
 └── decks/
     ├── 00-ai.toml
-    ├── 10-writing.toml
-    ├── 20-coding.toml
-    └── 30-physics.toml
+    ├── 10-coding.toml
+    ├── 20-writing.toml
+    └── personal.toml
 ```
 
-Put your deck definitions in the files under `decks/`. Please use the same structure format as the example above. Files load alphabetically, so numbering controls deck order. You don't need to restart the service to see any edits you make.
+Files load alphabetically, so numbering (`00-`, `10-`) controls deck order, while unnumbered files (`personal.toml`) or nested folders work out of the box. Edits take effect immediately without restarting the service.
 
 ## Appearance (`config.toml`)
 
